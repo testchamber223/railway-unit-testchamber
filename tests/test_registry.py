@@ -49,8 +49,22 @@ def test_empty_source_fails_unless_assumption(tmp_path):
     assert reg.get("E-001").record.status is Status.ASSUMPTION
 
 
+def test_empty_value_fails_unless_assumption(tmp_path):
+    with pytest.raises(EvidenceError, match="empty value"):
+        Registry(write_csv(tmp_path, "E-001,A,a,,W,Src,p1,standard,"))
+
+    reg = Registry(write_csv(tmp_path, "E-001,A,a,,-,Src,p1,assumption,"))
+    assert reg.get("E-001").value is None
+
+
 def test_list_assumptions_returns_e002():
-    assert [r.id for r in registry.list_assumptions()] == ["E-002"]
+    assert "E-002" in [r.id for r in registry.list_assumptions()]
+
+
+def test_e008_open_question_loads_with_empty_value():
+    e = registry.get("E-008")
+    assert e.value is None
+    assert e.record.status is Status.ASSUMPTION
 
 
 def test_unknown_id_raises():

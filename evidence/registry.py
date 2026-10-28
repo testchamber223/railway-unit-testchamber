@@ -8,6 +8,8 @@ Every physical constant used by ``core`` must be fetched here, e.g.::
 Validation rules (enforced on load):
     * ``status`` must be one of the ``Status`` values.
     * ``source`` may only be empty when ``status`` is ``assumption``.
+    * ``value`` may only be empty when ``status`` is ``assumption``
+      (an open question that must be resolved before the value is used).
     * ``id`` values must be unique.
 """
 
@@ -18,7 +20,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import (BaseModel, ConfigDict, ValidationError, field_validator,
+                      model_validator)
 
 DEFAULT_CSV = Path(__file__).with_name("evidence.csv")
 
@@ -41,31 +44,41 @@ class Status(StrEnum):
 class EvidenceRecord(BaseModel):
     """One row of ``evidence.csv``."""
 
-    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, allow_inf_nan=False)
 
     id: str
     name: str
     symbol: str
-    value: float
+    value: float | None
     unit: str
     source: str = ""
     clause_or_page: str = ""
     status: Status
     notes: str = ""
 
+    @field_validator("value", mode="before")
+    @classmethod
+    def _empty_value_is_none(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
+
     @model_validator(mode="after")
-    def _source_required(self) -> EvidenceRecord:
-        if not self.source and self.status is not Status.ASSUMPTION:
-            raise ValueError(
-                f"{self.id}: empty source is only allowed for status 'assumption'"
-            )
+    def _source_and_value_required(self) -> EvidenceRecord:
+        if self.status is not Status.ASSUMPTION:
+            if not self.source:
+                raise ValueError(
+                    f"{self.id}: empty source is only allowed for status 'assumption'"
+                )
+            if self.value is None:
+                raise ValueError(
+                    f"{self.id}: empty value is only allowed for status 'assumption'"
+                )
         return self
 
 
 class Evidence(NamedTuple):
     """Result of ``get``: the value, its unit and the full traceable record."""
 
-    value: float
+    value: float | None
     unit: str
     record: EvidenceRecord
 

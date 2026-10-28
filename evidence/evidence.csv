@@ -6,3 +6,4 @@ E-004,Standard atmospheric pressure,p_atm,101325,Pa,"ASHRAE Handbook Fundamental
 E-005,Specific heat of dry air (enthalpy formula),cp_da,1.006,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
 E-006,Enthalpy of water vapour at 0 C (formula constant),h_g0,2501,kJ/kg,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
 E-007,Specific heat of water vapour (formula constant),cp_w,1.86,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
+E-008,"k-value reference area definition (inner, outer or mean surface)",A_ref_k,,-,UIC 553 / UIC 553-1,to confirm,assumption,Must be confirmed before real coach data is used; changes UA directly
