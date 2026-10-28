@@ -1,0 +1,9 @@
+case_id,quantity,inputs,expected,unit,tolerance_pct,source,page,status
+PSY-001,sat_vapor_pressure,T=25,3169.8,Pa,0.2,"Cengel & Boles, Thermodynamics, Table A-4",to confirm,to confirm
+PSY-002,sat_vapor_pressure,T=35,5629.1,Pa,0.2,"Cengel & Boles, Thermodynamics, Table A-4",to confirm,to confirm
+PSY-003,sat_vapor_pressure,T=45,9595.3,Pa,0.2,"Cengel & Boles, Thermodynamics, Table A-4",to confirm,to confirm
+PSY-004,humidity_ratio,T=40;Twb=20;p=101325,,kg/kg,1.0,"ASHRAE Handbook Fundamentals 2017, Ch.1, Example 1",to confirm,to confirm
+PSY-005,enthalpy,T=40;Twb=20;p=101325,,kJ/kg,1.0,"ASHRAE Handbook Fundamentals 2017, Ch.1, Example 1",to confirm,to confirm
+PSY-006,dew_point,T=40;Twb=20;p=101325,,degC,1.0,"ASHRAE Handbook Fundamentals 2017, Ch.1, Example 1",to confirm,to confirm
+PSY-007,relative_humidity,T=40;Twb=20;p=101325,,%,1.0,"ASHRAE Handbook Fundamentals 2017, Ch.1, Example 1",to confirm,to confirm
+PSY-008,specific_volume,T=40;Twb=20;p=101325,,m3/kg,1.0,"ASHRAE Handbook Fundamentals 2017, Ch.1, Example 1",to confirm,to confirm

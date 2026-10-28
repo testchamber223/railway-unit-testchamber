@@ -1,0 +1,9 @@
+numpy
+scipy
+pandas
+matplotlib
+pydantic>=2
+psychrolib
+CoolProp
+pytest
+jupyter

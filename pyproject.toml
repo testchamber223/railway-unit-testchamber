@@ -1,0 +1,10 @@
+[project]
+name = "railway-hvac-sim"
+version = "0.0.1"
+description = "Evidence-based virtual test facility for railway HVAC units"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-rs"

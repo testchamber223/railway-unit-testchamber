@@ -1,0 +1,8 @@
+id,name,symbol,value,unit,source,clause_or_page,status,notes
+E-001,Passenger sensible heat,q_pax_s,120,W/person,UIC 553,to confirm,standard,Clause reference to be verified against the current edition
+E-002,Coach overall heat transfer coefficient (k-value),k_coach,1.2,W/m2K,,,assumption,Placeholder until a coach-specific k-value test or datasheet is available
+E-003,XPS thermal conductivity,lambda_xps,0.032,W/mK,Ravatherm XPS X PLUS datasheet,to confirm,datasheet,Declared lambda; check product variant and thickness
+E-004,Standard atmospheric pressure,p_atm,101325,Pa,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 3 / Table 1,standard,Sea-level standard atmosphere; default pressure for core.psychro
+E-005,Specific heat of dry air (enthalpy formula),cp_da,1.006,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
+E-006,Enthalpy of water vapour at 0 C (formula constant),h_g0,2501,kJ/kg,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
+E-007,Specific heat of water vapour (formula constant),cp_w,1.86,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
