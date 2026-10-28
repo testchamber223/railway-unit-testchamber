@@ -10,6 +10,7 @@ registry — no hard-coded numbers in the physics.
 |---------------|--------------------------------------------------------------------|
 | `core/`       | Physics library (psychrometrics, coach, unit, chamber, control, sensors, procedures) |
 | `evidence/`   | `evidence.csv` + `registry.py` loader/validator                    |
+| `data/`       | Coach definitions (YAML) whose every number is an evidence ID      |
 | `validation/` | Verification cases                                                 |
 | `ansys/`      | Future PyFluent scripts                                            |
 | `web/`        | Future website                                                     |
@@ -35,10 +36,12 @@ pytest
 ## Evidence rules
 
 `evidence/evidence.csv` columns:
-`id, name, symbol, value, unit, source, clause_or_page, status, notes`
+`id, name, symbol, value, tolerance, unit, source, clause_or_page, status, notes`
 
 - `status` ∈ `standard`, `datasheet`, `literature`, `calculated`, `assumption`
 - `source` may be empty **only** when `status` is `assumption`
+- `value` may be empty only when `status` is `assumption`; it may be text for definitions (e.g. E-008)
+- `tolerance` (optional) is a symmetric ± band in the row's unit
 - `id` must be unique (format `E-xxx`)
 
 Physics code must read constants through the registry:

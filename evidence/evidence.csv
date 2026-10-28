@@ -1,9 +1,42 @@
-id,name,symbol,value,unit,source,clause_or_page,status,notes
-E-001,Passenger sensible heat,q_pax_s,120,W/person,UIC 553,to confirm,standard,Clause reference to be verified against the current edition
-E-002,Coach overall heat transfer coefficient (k-value),k_coach,1.2,W/m2K,,,assumption,Placeholder until a coach-specific k-value test or datasheet is available
-E-003,XPS thermal conductivity,lambda_xps,0.032,W/mK,Ravatherm XPS X PLUS datasheet,to confirm,datasheet,Declared lambda; check product variant and thickness
-E-004,Standard atmospheric pressure,p_atm,101325,Pa,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 3 / Table 1,standard,Sea-level standard atmosphere; default pressure for core.psychro
-E-005,Specific heat of dry air (enthalpy formula),cp_da,1.006,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
-E-006,Enthalpy of water vapour at 0 C (formula constant),h_g0,2501,kJ/kg,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
-E-007,Specific heat of water vapour (formula constant),cp_w,1.86,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
-E-008,"k-value reference area definition (inner, outer or mean surface)",A_ref_k,,-,UIC 553 / UIC 553-1,to confirm,assumption,Must be confirmed before real coach data is used; changes UA directly
+id,name,symbol,value,tolerance,unit,source,clause_or_page,status,notes
+E-001,Passenger sensible heat,q_pax_s,120,,W/person,UIC 553,to confirm,standard,"Clause reference to be verified against the current edition; CONFLICT: E-025 gives 120 W/person as TOTAL heat - resolve before use"
+E-002,Coach overall heat transfer coefficient (k-value),k_coach,1.2,,W/m2K,,,assumption,Placeholder until a coach-specific k-value test or datasheet is available
+E-003,XPS thermal conductivity,lambda_xps,0.032,,W/mK,Ravatherm XPS X PLUS datasheet,to confirm,datasheet,Declared lambda; check product variant and thickness
+E-004,Standard atmospheric pressure,p_atm,101325,,Pa,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 3 / Table 1,standard,Sea-level standard atmosphere; default pressure for core.psychro
+E-005,Specific heat of dry air (enthalpy formula),cp_da,1.006,,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
+E-006,Enthalpy of water vapour at 0 C (formula constant),h_g0,2501,,kJ/kg,"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula; also used by core.loads.passengers to convert latent W to kg/s of water
+E-007,Specific heat of water vapour (formula constant),cp_w,1.86,,kJ/(kg.K),"ASHRAE Handbook Fundamentals 2017, Ch.1",Eq. 32,standard,Equation number to confirm: psychrolib 2.5.0 cites 2017 Ch.1 Eq. 30 for this formula
+E-008,"k-value reference area definition (inner, outer or mean surface)",A_ref_k,exterior developed surface Ae incl. roof insulation,,-,"UIC 553-1, 2nd ed. 2005",7.2.2,standard,confirm against the PDF; changes UA directly
+E-009,k-test temperature difference (inside - outside),dT_ktest,25,5,K,"UIC 553-1, 2nd ed. 2005",7.2.3,standard,confirm against the PDF
+E-010,k-test outside (chamber) temperature,T_out_ktest,5,2,degC,"UIC 553-1, 2nd ed. 2005",7.2.3 / Table 117,standard,"confirm against the PDF; DISCREPANCY: text gives +/-5 K, Table 117 gives +/-2 K - the stricter +/-2 K is used until resolved"
+E-011,k-test steady-state window,t_win_ktest,3,,h,"UIC 553-1, 2nd ed. 2005",7.2.3,standard,"confirm against the PDF; k from the mean of the last hour of the window (E-033); stability criterion inside the window: E-032"
+E-012,Interior temperature measuring height,h_meas,1.1,,m,"UIC 553-1, 2nd ed. 2005",7.2.2 / App. C,standard,confirm against the PDF
+E-013,"Solar intensity, Zone I, 40 degC case",I_sol_I_40,800,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 40 degC
+E-014,"Solar intensity, Zone I, 28 degC case",I_sol_I_28,600,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 28 degC
+E-015,"Solar intensity, Zone I, 22 degC case",I_sol_I_22,500,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 22 degC
+E-016,"Solar intensity, Zone II, 35 degC case",I_sol_II_35,700,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 35 degC
+E-017,"Solar intensity, Zone II, 28 degC case",I_sol_II_28,600,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 28 degC
+E-018,"Solar intensity, Zone II, 22 degC case",I_sol_II_22,500,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 22 degC
+E-019,"Solar intensity, Zone III, 28 degC case",I_sol_III_28,600,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 28 degC
+E-020,"Solar intensity, Zone III, 22 degC case",I_sol_III_22,500,,W/m2,"UIC 553-1, 2nd ed. 2005",5.4.4,standard,confirm against the PDF; with outside temperature 22 degC
+E-021,Solar factor for vertical surfaces (cos 30 deg),f_vert,0.866,,-,"UIC 553-1, 2nd ed. 2005",App. B,standard,confirm against the PDF; multiplies the solar intensity for vertical surfaces
+E-022,EN 13129 Zone I extreme outside temperature,T_out_ext_I,45,,degC,EN 13129:2016,to confirm,standard,confirm against the PDF
+E-023,EN 13129 Zone II design outside temperature,T_out_des_II,35,,degC,EN 13129:2016,to confirm,standard,confirm against the PDF
+E-024,EN 13129 interior comfort band,T_comfort,24.5,2.5,degC,EN 13129:2016,to confirm,standard,"confirm against the PDF; band 22-27 degC stored as 24.5 +/- 2.5"
+E-025,Passenger total heat,q_pax_tot,120,,W/person,UIC 553,"graph, to confirm",standard,confirm against the PDF; see conflict note on E-001
+E-026,Passenger sensible heat (split of E-025),q_pax_sens,,,W/person,,,assumption,confirm against the PDF; sensible/latent split not yet found
+E-027,Passenger latent heat (split of E-025),q_pax_lat,,,W/person,,,assumption,confirm against the PDF; sensible/latent split not yet found
+E-028,Fresh air per seat (outside temperature above 26 degC),V_fa_seat,15,,m3/(h.seat),UIC 553,to confirm,standard,confirm against the PDF; core.loads.fresh_air takes the volume at outside-air conditions
+E-029,Outside surface heat transfer coefficient,h_o,,,W/m2K,"ASHRAE Fundamentals Ch.18 / glazing datasheet, to find",,assumption,confirm against the PDF
+E-030,Opaque surface solar absorptance,alpha_opaque,,,-,"ASHRAE Fundamentals Ch.18 / glazing datasheet, to find",,assumption,confirm against the PDF
+E-031,Glazing total solar energy transmittance (g-value),g_glass,,,-,"ASHRAE Fundamentals Ch.18 / glazing datasheet, to find",,assumption,confirm against the PDF
+E-032,k-test stability criterion inside the steady-state window (max |dT_in/dt|),dTdt_max_ktest,0.1,,K/h,,,assumption,Criterion inside the E-011 window is not in the notes; 0.1 K/h carried over from the piece-3 spec - confirm against UIC 553-1 7.2.3
+E-033,k-test averaging period (k from the mean of the last hour),t_avg_ktest,1,,h,"UIC 553-1, 2nd ed. 2005",7.2.3,standard,confirm against the PDF
+E-034,Reference coach interior length (air volume),L_coach,,,m,,,assumption,"from team coach thermal data doc, to confirm"
+E-035,Reference coach interior width (air volume),W_coach,,,m,,,assumption,"from team coach thermal data doc, to confirm"
+E-036,Reference coach interior height (air volume),H_coach,,,m,,,assumption,"from team coach thermal data doc, to confirm"
+E-037,Reference coach exterior developed surface Ae (definition E-008),Ae_coach,,,m2,,,assumption,"from team coach thermal data doc, to confirm"
+E-038,Reference coach glazing area per side,A_glass_side,,,m2,,,assumption,"from team coach thermal data doc, to confirm"
+E-039,Reference coach number of seats,n_seats,,,-,,,assumption,"from team coach thermal data doc, to confirm"
+E-040,Reference coach effective interior heat capacity (air + interior mass),C_coach,,,J/K,,,assumption,"from team coach thermal data doc, to confirm"
+E-041,Reference coach equipment heat load,Q_equip,,,W,,,assumption,"from team coach thermal data doc, to confirm"

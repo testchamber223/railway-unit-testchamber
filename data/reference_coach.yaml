@@ -1,0 +1,19 @@
+# Reference coach definition.
+#
+# EVERY numeric field is an evidence ID resolved through evidence/registry.py,
+# never a number. core.coach.load_coach_definition() refuses to build the coach
+# while any of these IDs has an empty value, and lists the missing IDs.
+#
+# Envelope area Ae follows the k-value reference-area definition in E-008.
+# Length / width / height are interior dimensions, used for the air volume.
+
+name: reference coach
+k_value_W_m2K: E-002
+length_m: E-034
+width_m: E-035
+height_m: E-036
+envelope_area_Ae_m2: E-037
+glazing_area_per_side_m2: E-038
+seats: E-039
+heat_capacity_J_K: E-040
+equipment_load_W: E-041

@@ -7,3 +7,4 @@ psychrolib
 CoolProp
 pytest
 jupyter
+pyyaml

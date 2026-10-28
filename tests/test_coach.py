@@ -100,6 +100,46 @@ def test_k_value_test_raises_if_not_steady(coach):
         k_value_test(coach, T_out=0.0, Q_heater_W=10_000.0, t_end_s=3600.0)
 
 
+def test_k_value_test_uic_553_1_rule(coach):
+    # Test conditions inside E-009 / E-010: T_out = 5 degC and
+    # Q = UA * 25 K = 360 * 25 = 9000 W  ->  T_in - T_out -> 25 K.
+    tau = time_constant_s(coach)
+    res = k_value_test(coach, T_out=5.0, Q_heater_W=9000.0, t_end_s=10 * tau)
+    assert res.k_measured_W_m2K == pytest.approx(K, rel=5e-3)
+    assert res.conditions_ok, res.condition_violations
+    assert res.dT_K == pytest.approx(25.0, abs=0.01)
+
+    # k is mean(Q) / (A * mean(dT)) over the last hour (E-033) of the run,
+    # time-averaged over the output samples that fall in that hour.
+    d = res.data
+    t_last = d["t_s"][d["t_s"] >= d["t_s"].iloc[-1] - 3600.0]
+    dT_last = d["T_C"][t_last.index] - 5.0
+    dT_mean = np.trapezoid(dT_last, t_last) / (t_last.iloc[-1] - t_last.iloc[0])
+    assert res.k_measured_W_m2K == pytest.approx(9000.0 / (A * dT_mean), rel=1e-12)
+
+    # Steady = a full 3 h window (E-011) with |dT/dt| < 0.1 K/h (E-032).
+    # dT/dt = (Q/C) e^(-t/tau) drops below 0.1 K/h at t1 = tau ln(Q*3600/(C*0.1)),
+    # so the first complete window ends at t1 + 3 h (to within one output step).
+    t1 = tau * math.log(9000.0 * 3600.0 / (C * 0.1))
+    assert res.t_steady_s == pytest.approx(t1 + 3 * 3600.0, abs=60.0)
+
+
+def test_k_value_test_raises_without_full_steady_window(coach):
+    # 5 h is longer than the 3 h window but the coach is still warming up.
+    with pytest.raises(ValueError, match="not steady: the last 3 h window"):
+        k_value_test(coach, T_out=5.0, Q_heater_W=9000.0, t_end_s=5 * 3600.0)
+
+
+def test_k_value_test_reports_out_of_range_conditions(coach):
+    # T_out = 0 degC is outside 5 +/- 2 (E-010); dT = 10000/360 = 27.8 K is inside 25 +/- 5.
+    tau = time_constant_s(coach)
+    res = k_value_test(coach, T_out=0.0, Q_heater_W=10_000.0, t_end_s=10 * tau)
+    assert not res.conditions_ok
+    assert len(res.condition_violations) == 1
+    assert res.condition_violations[0].startswith("E-010")
+    assert res.k_measured_W_m2K == pytest.approx(K, rel=5e-3)  # still evaluated
+
+
 # f) time-varying input -----------------------------------------------------
 
 def test_sinusoidal_outside_temperature(coach):
