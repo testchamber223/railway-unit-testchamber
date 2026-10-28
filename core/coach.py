@@ -18,6 +18,13 @@ The coach interior is one well-mixed air zone with an effective heat capacity
                         (passengers, fresh air, solar, ...; see core.loads)
     t       time                                  [s]
 
+"With unit" mode (``simulate(..., unit=UnitOperation(...))``): the HVAC unit
+(core.unit) supplies m_s of conditioned air at (T_s, W_s); the same mass leaves
+at the zone state. Fresh air enters ONLY through the unit's mixing box, so a
+separate fresh-air load is rejected in this mode. The supply stream adds
+    Q_supply = m_s (h(T_s, W) - h(T, W)),   m_supply = m_s (W_s - W)
+to the energy and moisture balances (core.loads.supply_air).
+
 Assumptions: perfectly mixed air, lumped capacity, steady envelope
 conduction (no wall dynamics), constant dry-air mass, no condensation yet.
 Coach parameters come from the caller or, for the reference coach, from
@@ -38,7 +45,9 @@ import pandas as pd
 import yaml
 from scipy.integrate import solve_ivp
 
+from core import loads as _loads
 from core import psychro
+from core.unit import DXUnit, Mode, UnitResult
 from evidence import registry as _evidence
 from evidence.registry import EvidenceError, MissingEvidenceError, Registry
 
@@ -87,11 +96,36 @@ class LoadTerm:
 
     ``fn(t [s], T_in [degC], W_in [kg/kg]) -> (Q_sensible [W], m_water [kg/s])``,
     both positive into the coach. Reported as columns ``Q_<name>_W`` and
-    ``m_<name>_kg_s``.
+    ``m_<name>_kg_s``. Set ``is_fresh_air`` for fresh-air terms so that the
+    "with unit" mode can refuse them (fresh air then enters via the unit).
     """
 
     name: str
     fn: Callable[[float, float, float], tuple[float, float]]
+    is_fresh_air: bool = False
+
+
+@dataclass(frozen=True)
+class UnitOperation:
+    """How the HVAC unit runs in "with unit" mode.
+
+    Attributes:
+        unit: the DX unit model (core.unit.DXUnit).
+        mode: "cooling", "heating" or "ventilation".
+        part_load: compressor (cooling) or heater (heating) fraction 0..1,
+            constant for now (controller: piece 7).
+        RH_out: outside relative humidity 0..1 of the fresh air, constant or
+            f(t [s]); outside temperature is simulate()'s T_out.
+    """
+
+    unit: DXUnit
+    mode: Mode
+    part_load: float
+    RH_out: Input
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.part_load <= 1.0:
+            raise ValueError(f"part_load={self.part_load} must be in 0..1")
 
 
 # --------------------------------------------------------------------------
@@ -185,6 +219,7 @@ def simulate(
     W0: float | None = None,
     loads: Sequence[LoadTerm] = (),
     p: float | None = None,
+    unit: UnitOperation | None = None,
 ) -> pd.DataFrame:
     """Integrate the coach energy (and, if W0 is given, moisture) balance.
 
@@ -206,13 +241,18 @@ def simulate(
             modelled and W_kg_kg / RH are NaN. Requires coach.air_volume_m3.
         loads: extra state-dependent loads (requires W0).
         p: pressure [Pa] for dry-air mass and RH; defaults to E-004.
+        unit: run in "with unit" mode (requires W0; no fresh-air load terms).
 
     Returns:
         DataFrame with columns t_s [s], T_C [degC], W_kg_kg [kg/kg], RH [0-1],
         Q_env_W [W] (= UA (T_out - T), positive into the coach), Q_int_W [W],
         Q_hvac_W [W], m_cond_kg_s [kg/s], and Q_load_<name>_W [W] /
         m_load_<name>_kg_s [kg/s] per load term. ``df.attrs["M_da_kg"]`` holds
-        the dry-air mass (NaN if humidity is not modelled).
+        the dry-air mass (NaN if humidity is not modelled). In "with unit" mode
+        the supply stream appears as Q_load_unit_supply_W / m_load_unit_supply_kg_s
+        and unit details as unit_* columns (supply/mixed state, coil total and
+        sensible capacity, SHR, condensate, wet flag, extrapolation flag, fan and
+        heater heat, fresh-air enthalpy flow m_f (h_out - h_zone)).
 
     Solver: scipy.integrate.solve_ivp, method LSODA.
     """
@@ -225,7 +265,23 @@ def simulate(
         raise ValueError("load terms need the humidity state: pass W0")
     if len({term.name for term in loads}) != len(loads):
         raise ValueError("load term names must be unique")
+    if unit is not None:
+        if not humid:
+            raise ValueError("'with unit' mode needs the humidity state: pass W0")
+        fresh = [t.name for t in loads if t.is_fresh_air or t.name == "fresh_air"]
+        if fresh:
+            raise ValueError(f"'with unit' mode: fresh air enters via the unit's mixing box; "
+                             f"remove load term(s) {fresh}")
+        f_rh = _as_function(unit.RH_out)
     M_da = dry_air_mass_kg(coach, T0, W0, p) if humid else math.nan
+
+    def unit_eval(t: float, T: float, W: float) -> tuple[UnitResult, float, float, float]:
+        T_o = f_out(t)
+        W_f = psychro.humidity_ratio(T_o, f_rh(t), p)
+        res = unit.unit.operate(T, W, T_o, W_f, T_o, unit.mode, unit.part_load)
+        s = res.supply
+        q_s, _, m_w = _loads.supply_air(s.m_da, s.T_C, s.W, T, W)
+        return res, q_s, m_w, W_f
 
     def m_cond(t: float, T: float, W: float) -> float:
         return 0.0  # condensation on the evaporator: not modelled yet
@@ -239,6 +295,10 @@ def simulate(
             q_i, m_i = term.fn(t, T, W)
             Q += q_i
             m += m_i
+        if unit is not None:
+            _, q_s, m_w, _ = unit_eval(t, T, W)
+            Q += q_s
+            m += m_w
         return [Q / C, m / M_da] if humid else [Q / C]
 
     y0 = [float(T0), float(W0)] if humid else [float(T0)]
@@ -268,6 +328,34 @@ def simulate(
         q_m = np.array([term.fn(ti, Ti, Wi) for ti, Ti, Wi in zip(t, T, W)])
         df[f"Q_load_{term.name}_W"] = q_m[:, 0]
         df[f"m_load_{term.name}_kg_s"] = q_m[:, 1]
+    if unit is not None:
+        rows = []
+        for ti, Ti, Wi in zip(t, T, W):
+            res, q_s, m_w, W_f = unit_eval(ti, Ti, Wi)
+            s, c = res.supply, res.coil
+            h_z = psychro.enthalpy(Ti, Wi)
+            rows.append({
+                "Q_load_unit_supply_W": q_s,
+                "m_load_unit_supply_kg_s": m_w,
+                "unit_T_supply_C": s.T_C,
+                "unit_W_supply_kg_kg": s.W,
+                "unit_m_supply_kg_s": s.m_da,
+                "unit_m_fresh_kg_s": res.m_fresh_kg_s,
+                "unit_T_mixed_C": res.mixed.T_C,
+                "unit_W_mixed_kg_kg": res.mixed.W,
+                "unit_Q_coil_total_W": c.Q_total_W if c else 0.0,
+                "unit_Q_coil_sensible_W": c.Q_sensible_W if c else 0.0,
+                "unit_shr": c.shr if c else math.nan,
+                "unit_m_condensate_kg_s": c.condensate_kg_s if c else 0.0,
+                "unit_coil_wet": c.wet if c else False,
+                "unit_extrapolated": c.extrapolated if c else None,
+                "unit_Q_fan_W": res.Q_fan_W,
+                "unit_Q_heater_W": res.Q_heater_W,
+                "unit_Q_fresh_enthalpy_W":
+                    res.m_fresh_kg_s * (psychro.enthalpy(f_out(ti), W_f) - h_z),
+                "unit_Q_supply_total_W": s.m_da * (psychro.enthalpy(s.T_C, s.W) - h_z),
+            })
+        df = pd.concat([df, pd.DataFrame(rows)], axis=1)
     df.attrs["M_da_kg"] = M_da
     return df
 

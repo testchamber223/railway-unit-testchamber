@@ -143,12 +143,95 @@ unit; it raises `MissingEvidenceError` for empty or text values.
 | k-test steady time = analytical t(0.1 K/h) + 3 h | ± one output step | pass |
 | Reference coach loader | lists missing IDs | E-034…E-041 |
 
-### Open evidence items
+Open evidence items are listed in the last section of this file.
+
+## Unit model L1: method, sources, limits (generic curves until real unit data)
+
+**Unit card** (`data/units/<unit_id>.yaml`, schema `core.unit.UnitCard`). Every
+field is `{value, unit, source, page, status}` with status `datasheet`,
+`standard`, `literature` or `assumption`; an empty value is allowed only for
+`assumption`. Units are converted to SI on read (kW→W, m³/h→m³/s, %→fraction).
+`UnitCard.open_items()` / `report()` list every field that is missing or an
+assumption, and `DXUnit.from_card()` refuses to build the model while any
+required value is empty, listing those fields.
+
+*Kaeser-Noske DHF14-RVKE* (`data/units/kaeser_noske_dhf14.yaml`, datasheet via
+railway-news.com, p. 1): cooling 4.0 kW at 35 °C outside, heating 4.5 kW at
+−20 °C outside, supply air 700 m³/h. Not on the datasheet, so assumption with
+an empty value: indoor rating condition (dry- and wet-bulb), fresh airflow,
+compressor power, fan power, fan position, refrigerant; SHR / sensible
+capacity is absent and falls back to E-050 (empty). **The DHF14 model
+therefore does not run yet**; the loader reports 8 open items.
+
+**Method** (`core/unit.py`; EnergyPlus Engineering Reference, *Single-Speed
+Electric DX Air Cooling Coil*):
+
+| Step | Equation / rule | Source |
+|---|---|---|
+| Capacity curve | f = a + b·x + c·x² + d·y + e·y² + f·x·y; x = coil-inlet wet-bulb, y = outdoor dry-bulb (°C) | E-042…E-047 (EnergyPlus EMS Application Guide, Ex. 11) |
+| Normalisation | Q_tot = Q_rated · f(x, y) / f(x_rating, y_rating) — exact at the datasheet point | unit card |
+| Rated bypass factor | rated outlet from Q_rated and SHR; line inlet→outlet in (h, W) extended to saturation = ADP; BF = (h_out − h_ADP)/(h_in − h_ADP) | unit card; SHR fallback E-050 |
+| BF at other flows | A0 = −ln(BF_rated)·ṁ_rated, BF = exp(−A0/ṁ) | EnergyPlus |
+| Operating point | h_ADP = h_in − (Q/ṁ)/(1 − BF); SHR = (h(T_in, W_ADP) − h_ADP)/(h_in − h_ADP) | EnergyPlus |
+| Dry coil | if W_ADP ≥ W_in, iterate the curve wet-bulb to the dry boundary; SHR = 1, no condensate | EnergyPlus |
+| Part load | continuous fan, cycling compressor: outlet h and W = PLR-weighted mix of full-load outlet and inlet | EnergyPlus (no PLF curve) |
+| Mixing box | mass-weighted W and h of return and fresh dry-air flows | ASHRAE Ch. 1 |
+| Fan | P_fan added as sensible heat before the coil (blow-through) or after it (draw-through) | card |
+| Heater | Q = PLR · Q_heat_rated, sensible | card |
+
+Mass flows: supply ṁ_s = V̇_supply / v(rating inlet) (constant); fresh
+ṁ_f = V̇_fresh / v(outside air); return = ṁ_s − ṁ_f.
+
+**Coupling** (`simulate(..., unit=UnitOperation(unit, mode, part_load, RH_out))`).
+The zone receives ṁ_s at the supply state and loses the same mass at zone
+conditions: Q_supply = ṁ_s (h(T_s, W) − h(T, W)), ṁ_w = ṁ_s (W_s − W)
+(`core.loads.supply_air`). Fresh air enters only through the mixing box; a
+separate fresh-air load term is refused in this mode. Part load is a constant
+input until the controller (piece 7).
+
+**Limits of L1 — read before using results.**
+- The capacity curve is a *generic* EnergyPlus example, not the unit's own
+  performance map; only the rating point is unit-specific.
+- Curve validity limits (E-048) are unknown, so the extrapolation flag is
+  `None` in all runs until E-048 is filled.
+- No airflow-fraction capacity curve, no part-load degradation (PLF), no
+  compressor power (E-049 empty), no condensate re-evaporation.
+- The card's "indoor" rating condition is taken as the coil inlet state.
+- Fan motor heat is assumed to be entirely in the air stream.
+- The split between sensible and latent heat depends on the humidity used as
+  reference: the coil's sensible capacity and the zone's sensible loads differ
+  by a term ṁ_f·c_p,w·ΔW·ΔT (0.4 % in the no-passenger test case).
+- Passenger latent heat is converted with h_g0 (E-006), so the vapour's
+  sensible part (≈ ṁ_w·1.86·T) is not in the coil's total-load bookkeeping.
+
+**Verification** (`tests/test_unit.py`, `tests/test_coach_unit.py`;
+verification-only unit `tests/data/verification_unit.yaml`; illustrated in
+`docs/piece5_unit.ipynb`):
+
+| Check | Criterion | Achieved |
+|---|---|---|
+| capacity_modifier(19.44, 35) | within 0.002 of 1 | 0.99984 |
+| Q_tot at the datasheet rating condition | 1e-9 | exact (2e-16) |
+| Coil at rating inlet reproduces rated SHR | 1e-9 | 2e-15 |
+| Coil energy / moisture balance (8 inlet states, incl. part load and dry) | 0.1 % | pass |
+| Outlet RH ≤ 100 %, 0 ≤ SHR ≤ 1, T_out ≤ T_in | — | pass |
+| Dry coil when inlet dew point < ADP | no condensate, SHR = 1 | pass |
+| Extrapolation flag with test limits | raised outside, not inside | pass |
+| Mixing equal flows | mean W and h | 1e-12 |
+| Pull-down: zone energy balance | 0.1 % | 6e-5 % |
+| Pull-down: zone moisture balance | 0.1 % | 8e-3 % |
+| Unit identity ṁ_s(h_s − h_z) = ṁ_f(h_o − h_z) − Q_coil + P_fan | every step | 1e-9 |
+| Steady state: coil sensible = sensible loads + fan | 0.5 % | 0.014 % |
+| No double counting (no passengers/sun): coil total = envelope + fresh-air Δh + fan | 0.5 % | 1e-3 % |
+| Heating mode: supply gain = fresh-air Δh + heater + fan; energy balance | 1e-9 / 0.1 % | pass |
+
+## Open evidence items
 
 Every evidence row still marked `assumption`, "to confirm" or "confirm against
 the PDF", grouped by who could supply it. `tests/test_registry.py` fails if an
 open item is missing from this table. The EOG grouping is a first guess at
-that party's scope — reassign rows as needed.
+that party's scope — reassign rows as needed. Unit-card fields (e.g. the
+DHF14's missing rating condition) are reported by `UnitCard.report()`.
 
 **Team (coach thermal data doc)**
 
@@ -171,6 +254,14 @@ that party's scope — reassign rows as needed.
 | E-003 | XPS thermal conductivity | 0.032 W/mK | datasheet | Ravatherm XPS X PLUS datasheet / to confirm | page / product variant to confirm |
 | E-030 | Opaque surface solar absorptance | *empty* | assumption | ASHRAE Fundamentals Ch.18 / glazing datasheet, to find | value missing; check against the PDF |
 | E-031 | Glazing total solar energy transmittance (g-value) | *empty* | assumption | ASHRAE Fundamentals Ch.18 / glazing datasheet, to find | value missing; check against the PDF |
+
+**Unit manufacturer / EnergyPlus data (unit performance)**
+
+| ID | Item | Value | Status | Source / clause | What is open |
+|---|---|---|---|---|---|
+| E-048 | DX cooling capacity curve validity limits (x: inlet wet-bulb; y: outdoor dry-bulb) | *empty* | assumption | - | value missing; until filled the extrapolation flag is None |
+| E-049 | DX EIR (power) curve coefficients | *empty* | assumption | - | value missing; needed only for compressor power |
+| E-050 | Rated sensible heat ratio fallback (unit datasheet gives no SHR) | *empty* | assumption | - | value missing; coil refuses to run for cards without SHR |
 
 **Standard documents (UIC 553, UIC 553-1, EN 13129, ASHRAE)**
 

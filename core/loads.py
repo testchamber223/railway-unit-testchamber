@@ -113,7 +113,26 @@ def fresh_air(
     _non_negative(volume_flow_m3_h=volume_flow_m3_h)
     W_out = psychro.humidity_ratio(T_out, RH_out, p)
     m_da = volume_flow_m3_h / SECONDS_PER_HOUR / psychro.specific_volume(T_out, W_out, p)
-    h_out_Win = psychro.enthalpy(T_out, W_in)
-    Q_sens = m_da * (h_out_Win - psychro.enthalpy(T_in, W_in))
-    Q_lat = m_da * (psychro.enthalpy(T_out, W_out) - h_out_Win)
-    return Q_sens, Q_lat, m_da * (W_out - W_in)
+    return supply_air(m_da, T_out, W_out, T_in, W_in)
+
+
+def supply_air(
+    m_da: float, T_supply: float, W_supply: float, T_in: float, W_in: float,
+) -> tuple[float, float, float]:
+    """Load of an air stream entering the coach: (sensible [W], latent [W], water [kg/s]).
+
+    m_da [kg dry air/s] enters at (T_supply, W_supply) and the same mass leaves
+    at the interior state (T_in, W_in). With h(T, W) from core.psychro.enthalpy:
+
+        Q_sens = m_da * (h(T_supply, W_in) - h(T_in, W_in))
+        Q_lat  = m_da * (h(T_supply, W_supply) - h(T_supply, W_in))
+        m_w    = m_da * (W_supply - W_in)
+
+    Negative values mean cooling / dehumidifying. Used for fresh air
+    (``fresh_air``) and for the HVAC unit's supply air (core.coach unit mode).
+    """
+    _non_negative(m_da=m_da)
+    h_sup_Win = psychro.enthalpy(T_supply, W_in)
+    Q_sens = m_da * (h_sup_Win - psychro.enthalpy(T_in, W_in))
+    Q_lat = m_da * (psychro.enthalpy(T_supply, W_supply) - h_sup_Win)
+    return Q_sens, Q_lat, m_da * (W_supply - W_in)

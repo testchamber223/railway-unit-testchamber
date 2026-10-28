@@ -135,3 +135,35 @@ def test_temperature_out_of_range_raises(T):
 def test_default_pressure_from_registry():
     p = registry.get("E-004").value
     assert psychro.humidity_ratio(25.0, 0.5) == psychro.humidity_ratio(25.0, 0.5, p)
+
+
+# --------------------------------------------------------------------------
+# Saturation and inverse relations (used by core.unit)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("T,RH", GRID)
+def test_wet_bulb_from_humidity_ratio_inverts_eq33(T, RH):
+    W = psychro.humidity_ratio(T, RH)
+    Twb = psychro.wet_bulb_from_humidity_ratio(T, W)
+    assert psychro.humidity_ratio_from_wet_bulb(T, Twb) == pytest.approx(W, rel=1e-9)
+    assert Twb == pytest.approx(psychro.wet_bulb(T, RH), abs=2e-3)  # psychrolib bisection
+
+
+@pytest.mark.parametrize("T", [-10.0, 0.0, 12.0, 25.0, 45.0])
+def test_sat_temperature_from_enthalpy_round_trip(T):
+    h = psychro.sat_air_enthalpy(T)
+    assert psychro.sat_temperature_from_enthalpy(h) == pytest.approx(T, abs=1e-8)
+    assert psychro.enthalpy(T, psychro.sat_humidity_ratio(T)) == pytest.approx(h, rel=1e-12)
+
+
+@pytest.mark.parametrize("T,RH", GRID)
+def test_dry_bulb_and_humidity_from_enthalpy(T, RH):
+    W = psychro.humidity_ratio(T, RH)
+    h = psychro.enthalpy(T, W)
+    assert psychro.dry_bulb_from_enthalpy(h, W) == pytest.approx(T, abs=1e-9)
+    assert psychro.humidity_ratio_from_enthalpy(T, h) == pytest.approx(W, rel=1e-9)
+
+
+def test_wet_bulb_rejects_supersaturated_air():
+    with pytest.raises(ValueError, match="saturation"):
+        psychro.wet_bulb_from_humidity_ratio(20.0, 1.5 * psychro.sat_humidity_ratio(20.0))

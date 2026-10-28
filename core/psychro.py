@@ -17,6 +17,7 @@ the evidence registry (E-004). Inputs are scalars.
 from __future__ import annotations
 
 import psychrolib
+from scipy.optimize import brentq
 
 from evidence import registry
 
@@ -143,3 +144,69 @@ def specific_volume(T: float, W: float, p: float | None = None) -> float:
     v = R_da (T + 273.15) (1 + 1.607858 W) / p, ASHRAE Eq. 26.
     """
     return psychrolib.GetMoistAirVolume(_check_T(T), _check_W(W), _pressure(p))
+
+
+# --------------------------------------------------------------------------
+# Saturation and inverse relations (used by the DX coil model, core.unit)
+# --------------------------------------------------------------------------
+
+# Root-finding tolerances for the inverse relations (numerics, not physics).
+_XTOL_T = 1e-9  # K
+
+
+def sat_humidity_ratio(T: float, p: float | None = None) -> float:
+    """Humidity ratio of saturated air W_s [kg/kg dry air] at T [degC], p [Pa].
+
+    W_s = 0.621945 pws / (p - pws), ASHRAE Eq. 20 with pw = pws (Eq. 5 / 6).
+    """
+    return psychrolib.GetSatHumRatio(_check_T(T), _pressure(p))
+
+
+def sat_air_enthalpy(T: float, p: float | None = None) -> float:
+    """Enthalpy of saturated air [J/kg dry air] at T [degC], p [Pa] (ASHRAE Eq. 30 with W_s)."""
+    return psychrolib.GetSatAirEnthalpy(_check_T(T), _pressure(p))
+
+
+def sat_temperature_from_enthalpy(h: float, p: float | None = None) -> float:
+    """Temperature [degC] of saturated air with enthalpy h [J/kg dry air] at p [Pa].
+
+    Solves sat_air_enthalpy(T) = h by Brent's method on T_MIN..T_MAX
+    (EnergyPlus PsyTsatFnHPb equivalent).
+    """
+    p = _pressure(p)
+    lo, hi = sat_air_enthalpy(T_MIN, p), sat_air_enthalpy(T_MAX, p)
+    if not lo <= h <= hi:
+        raise ValueError(f"h={h} J/kg is outside the saturation range {lo:.0f}..{hi:.0f} J/kg")
+    return brentq(lambda T: psychrolib.GetSatAirEnthalpy(T, p) - h, T_MIN, T_MAX, xtol=_XTOL_T)
+
+
+def dry_bulb_from_enthalpy(h: float, W: float) -> float:
+    """Dry-bulb temperature [degC] from enthalpy h [J/kg dry air] and W [kg/kg].
+
+    ASHRAE Eq. 30 solved for T: T = (h - 2501e3 W) / (1006 + 1860 W).
+    """
+    T = psychrolib.GetTDryBulbFromEnthalpyAndHumRatio(h, _check_W(W))
+    return _check_T(T)
+
+
+def humidity_ratio_from_enthalpy(T: float, h: float) -> float:
+    """Humidity ratio [kg/kg dry air] from T [degC] and h [J/kg dry air] (ASHRAE Eq. 30 solved for W)."""
+    return psychrolib.GetHumRatioFromEnthalpyAndTDryBulb(h, _check_T(T))
+
+
+def wet_bulb_from_humidity_ratio(T: float, W: float, p: float | None = None) -> float:
+    """Thermodynamic wet-bulb temperature [degC] from T [degC], W [kg/kg], p [Pa].
+
+    Solves humidity_ratio_from_wet_bulb(T, Twb) = W (ASHRAE Eq. 33 / 35) by
+    Brent's method to 1e-9 K, giving a smooth result for ODE right-hand sides.
+    """
+    _check_T(T)
+    _check_W(W)
+    p = _pressure(p)
+    W_sat = psychrolib.GetSatHumRatio(T, p)
+    if W > W_sat * (1 + 1e-12):
+        raise ValueError(f"W={W} exceeds saturation {W_sat:.6g} kg/kg at T={T} degC")
+    if W >= W_sat:
+        return T
+    return brentq(lambda Twb: psychrolib.GetHumRatioFromTWetBulb(T, Twb, p) - W,
+                  T_MIN, T, xtol=_XTOL_T)

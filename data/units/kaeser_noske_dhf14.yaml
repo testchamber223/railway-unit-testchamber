@@ -1,0 +1,35 @@
+# Kaeser-Noske DHF14-RVKE -- real unit, INCOMPLETE datasheet.
+# Only the values printed on the public datasheet are filled; everything the
+# datasheet does not state is an assumption with an empty value, so
+# core.unit.DXUnit.from_card() refuses to build the model and lists them.
+
+unit_id: kaeser_noske_dhf14
+name: Kaeser-Noske DHF14-RVKE
+notes: >-
+  Public datasheet gives cooling capacity at 35 degC outside, heating capacity
+  at -20 degC outside and supply airflow only.
+
+rated_total_cooling_capacity:
+  {value: 4.0, unit: kW, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
+rating_outdoor_dry_bulb:
+  {value: 35, unit: degC, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
+rating_indoor_dry_bulb:
+  {value: null, unit: degC, status: assumption}
+rating_indoor_wet_bulb:
+  {value: null, unit: degC, status: assumption}
+supply_airflow:
+  {value: 700, unit: m3/h, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
+fresh_airflow:
+  {value: null, unit: m3/h, status: assumption}
+compressor_power:
+  {value: null, unit: kW, status: assumption}
+fan_power:
+  {value: null, unit: W, status: assumption}
+fan_position:
+  {value: null, unit: "-", status: assumption}
+heating_capacity:
+  {value: 4.5, unit: kW, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
+heating_rating_outdoor_dry_bulb:
+  {value: -20, unit: degC, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
+refrigerant:
+  {value: null, unit: "-", status: assumption}

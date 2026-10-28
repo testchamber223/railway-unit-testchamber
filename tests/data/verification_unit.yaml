@@ -1,0 +1,18 @@
+# VERIFICATION-ONLY unit card. Round numbers chosen to exercise the maths of
+# core.unit (rating point loosely AHRI-like). This is NOT data for any real
+# unit; every field is therefore marked as an assumption.
+
+unit_id: verification_unit
+name: Verification unit (maths check only)
+
+rated_total_cooling_capacity: {value: 30, unit: kW, source: verification-only, status: assumption}
+rating_outdoor_dry_bulb:      {value: 35, unit: degC, source: verification-only, status: assumption}
+rating_indoor_dry_bulb:       {value: 26.7, unit: degC, source: verification-only, status: assumption}
+rating_indoor_wet_bulb:       {value: 19.4, unit: degC, source: verification-only, status: assumption}
+rated_shr:                    {value: 0.75, unit: "-", source: verification-only, status: assumption}
+supply_airflow:               {value: 6000, unit: m3/h, source: verification-only, status: assumption}
+fresh_airflow:                {value: 1200, unit: m3/h, source: verification-only, status: assumption}
+fan_power:                    {value: 1500, unit: W, source: verification-only, status: assumption}
+fan_position:                 {value: draw-through, unit: "-", source: verification-only, status: assumption}
+heating_capacity:             {value: 20, unit: kW, source: verification-only, status: assumption}
+refrigerant:                  {value: "n/a (verification)", unit: "-", source: verification-only, status: assumption}

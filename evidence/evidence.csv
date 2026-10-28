@@ -40,3 +40,12 @@ E-038,Reference coach glazing area per side,A_glass_side,,,m2,,,assumption,"from
 E-039,Reference coach number of seats,n_seats,,,-,,,assumption,"from team coach thermal data doc, to confirm"
 E-040,Reference coach effective interior heat capacity (air + interior mass),C_coach,,,J/K,,,assumption,"from team coach thermal data doc, to confirm"
 E-041,Reference coach equipment heat load,Q_equip,,,W,,,assumption,"from team coach thermal data doc, to confirm"
+E-042,DX cooling capacity curve f(x y) coefficient a (constant),capft_a,0.942587793,,-,"EnergyPlus EMS Application Guide, Example 11 (Curve:Biquadratic HPACCoolCapFT)",Example 11,literature,"page also prints 0.942567793 in the EMS code; the input-object value is used. f = a + b x + c x^2 + d y + e y^2 + f x y with x = coil inlet wet-bulb (degC), y = outdoor dry-bulb (degC)"
+E-043,DX cooling capacity curve coefficient b (x),capft_b,0.009543347,,-,"EnergyPlus EMS Application Guide, Example 11 (Curve:Biquadratic HPACCoolCapFT)",Example 11,literature,x = coil inlet wet-bulb (degC)
+E-044,DX cooling capacity curve coefficient c (x^2),capft_c,0.000683770,,-,"EnergyPlus EMS Application Guide, Example 11 (Curve:Biquadratic HPACCoolCapFT)",Example 11,literature,x = coil inlet wet-bulb (degC)
+E-045,DX cooling capacity curve coefficient d (y),capft_d,-0.011042676,,-,"EnergyPlus EMS Application Guide, Example 11 (Curve:Biquadratic HPACCoolCapFT)",Example 11,literature,y = outdoor dry-bulb (degC)
+E-046,DX cooling capacity curve coefficient e (y^2),capft_e,0.000005249,,-,"EnergyPlus EMS Application Guide, Example 11 (Curve:Biquadratic HPACCoolCapFT)",Example 11,literature,y = outdoor dry-bulb (degC)
+E-047,DX cooling capacity curve coefficient f (x y),capft_f,-0.000009720,,-,"EnergyPlus EMS Application Guide, Example 11 (Curve:Biquadratic HPACCoolCapFT)",Example 11,literature,x = coil inlet wet-bulb; y = outdoor dry-bulb (degC)
+E-048,DX cooling capacity curve validity limits (x: inlet wet-bulb; y: outdoor dry-bulb),capft_limits,,,degC,,,assumption,"to find; when filled write as text 'x_min..x_max; y_min..y_max' (degC). Until then core.unit cannot flag extrapolation"
+E-049,DX EIR (power) curve coefficients,eirft,,,-,,,assumption,to find; needed only for compressor power
+E-050,Rated sensible heat ratio fallback (unit datasheet gives no SHR),SHR_rated,,,-,,,assumption,"to find; used only when the unit card has neither rated SHR nor rated sensible capacity. core.unit refuses to run the coil until filled"

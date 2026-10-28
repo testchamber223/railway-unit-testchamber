@@ -10,7 +10,7 @@ registry — no hard-coded numbers in the physics.
 |---------------|--------------------------------------------------------------------|
 | `core/`       | Physics library (psychrometrics, coach, unit, chamber, control, sensors, procedures) |
 | `evidence/`   | `evidence.csv` + `registry.py` loader/validator                    |
-| `data/`       | Coach definitions (YAML) whose every number is an evidence ID      |
+| `data/`       | Coach definitions (every number an evidence ID) and HVAC unit cards (`data/units/`) |
 | `validation/` | Verification cases                                                 |
 | `ansys/`      | Future PyFluent scripts                                            |
 | `web/`        | Future website                                                     |
