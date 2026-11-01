@@ -49,3 +49,29 @@ E-047,DX cooling capacity curve coefficient f (x y),capft_f,-0.000009720,,-,"Ene
 E-048,DX cooling capacity curve validity limits (x: inlet wet-bulb; y: outdoor dry-bulb),capft_limits,,,degC,,,assumption,"to find; when filled write as text 'x_min..x_max; y_min..y_max' (degC). Until then core.unit cannot flag extrapolation"
 E-049,DX EIR (power) curve coefficients,eirft,,,-,,,assumption,to find; needed only for compressor power
 E-050,Rated sensible heat ratio fallback (unit datasheet gives no SHR),SHR_rated,,,-,,,assumption,"to find; used only when the unit card has neither rated SHR nor rated sensible capacity. core.unit refuses to run the coil until filled"
+E-051,DHF14 coil-inlet wet-bulb at rating (ILLUSTRATION ONLY),Twb_dhf14_plot,19.4,,degC,"AHRI-style value chosen for illustration; not on the DHF14 datasheet",,plot-only assumption,"PLOT-ONLY: used only to draw the curve shape in docs/piece5_unit.ipynb; registry.get refuses it unless allow_plot_only=True, so no procedure or report can use it"
+E-052,Unit test room: indoor room dry-bulb control tolerance,tol_T_in_room,,,K,,,assumption,"ASHRAE 37 / EN 14511-3 test tolerances, clause to confirm"
+E-053,Unit test room: indoor room relative humidity control tolerance,tol_RH_in_room,,,-,,,assumption,"ASHRAE 37 / EN 14511-3 test tolerances, clause to confirm"
+E-054,Unit test room: outdoor room dry-bulb control tolerance,tol_T_out_room,,,K,,,assumption,"ASHRAE 37 / EN 14511-3 test tolerances, clause to confirm"
+E-055,Unit test room: outdoor room relative humidity control tolerance,tol_RH_out_room,,,-,,,assumption,"ASHRAE 37 / EN 14511-3 test tolerances, clause to confirm"
+E-056,Unit test room: indoor room conditioning capacity limit,Q_max_in_room,,,W,,,assumption,to find (facility data)
+E-057,Unit test room: outdoor room conditioning capacity limit,Q_max_out_room,,,W,,,assumption,to find (facility data)
+E-058,Virtual temperature sensor accuracy (+/-),acc_T,,,K,,,assumption,to find (sensor calibration certificates); used for every temperature channel
+E-059,Virtual relative humidity sensor accuracy (+/-),acc_RH,,,-,,,assumption,to find (sensor calibration certificates); RH as a fraction
+E-060,Virtual airflow measurement accuracy (+/- relative),acc_airflow,,,-,,,assumption,to find (nozzle / flow-meter calibration)
+E-061,CETEMET full-coach climatic chamber inside dimensions (L x W x H),dims_cetemet,28 x 5 x 5.5,,m,ENAC accreditation news page (CETEMET full-coach chamber),,literature,confirm against CETEMET / ENAC data
+E-062,Vehicle chamber air temperature control tolerance,tol_T_chamber,,,K,,,assumption,to find (facility data)
+E-063,Vehicle chamber relative humidity control tolerance,tol_RH_chamber,,,-,,,assumption,to find (facility data)
+E-064,Vehicle chamber heating capacity,Q_heat_chamber,,,W,,,assumption,to find (facility data)
+E-065,Vehicle chamber cooling capacity,Q_cool_chamber,,,W,,,assumption,to find (facility data)
+E-066,Vehicle chamber air temperature ramp-rate limit,ramp_chamber,,,K/h,,,assumption,to find (facility data)
+E-067,Number of chamber air temperature probes,n_probes_chamber,8,,-,"UIC 553-1, 2nd ed. 2005",App. H,standard,confirm against the PDF; measured chamber temperature = mean of these probes
+E-068,Pull-down test cabin temperature setpoint,T_sp_pulldown,,,degC,,,assumption,EN 13129 clause to confirm
+E-069,Pull-down test setpoint tolerance,tol_sp_pulldown,,,K,,,assumption,EN 13129 clause to confirm
+E-070,Pull-down test maximum time to reach setpoint,t_max_pulldown,,,h,,,assumption,EN 13129 clause to confirm
+E-071,Chamber relative humidity for cooling tests (pull-down / comfort),RH_chamber_cooling,,,-,,,assumption,EN 13129 clause to confirm
+E-072,Comfort / soak stability window,t_win_comfort,,,h,,,assumption,EN 13129 clause to confirm
+E-073,Comfort / soak stability criterion (max cabin drift),dTdt_max_comfort,,,K/h,,,assumption,EN 13129 clause to confirm
+E-074,Comfort test measurement duration,t_meas_comfort,,,h,,,assumption,EN 13129 clause to confirm
+E-075,Unit capacity test acceptance tolerance (measured vs rated),tol_capacity,,,-,,,assumption,"EN 14750-1 / EN 14511 clause to confirm; relative"
+E-076,Unit capacity test measurement duration,t_meas_capacity,,,h,,,assumption,"ASHRAE 37 / EN 14511-3 clause to confirm"

@@ -76,19 +76,32 @@ def solar_opaque_sol_air(
     return k * A_opaque * (T_sol_air - T_in)
 
 
-def passengers(n: float, sensible_W: float, latent_W: float) -> tuple[float, float]:
+def vapour_enthalpy(T: float) -> float:
+    """Specific enthalpy of water vapour h_g(T) = h_g0 + cp_w * T [J/kg] at T [degC].
+
+    The vapour term of the ASHRAE moist-air enthalpy formula (E-006, E-007).
+    """
+    h_g0 = registry.number("E-006", "kJ/kg") * J_PER_KJ
+    cp_w = registry.number("E-007", "kJ/(kg.K)") * J_PER_KJ
+    return h_g0 + cp_w * T
+
+
+def passengers(
+    n: float, sensible_W: float, latent_W: float, T_in: float | None = None,
+) -> tuple[float, float]:
     """Passenger loads: (sensible heat [W], water released [kg/s]).
 
         Q_sens = n * sensible_W
-        m_w    = n * latent_W / h_g0
+        m_w    = n * latent_W / h_g(T_in),   h_g(T) = h_g0 + cp_w T  (E-006, E-007)
 
     n [-] passengers; sensible_W, latent_W [W/person] (E-026 / E-027, split of
-    the total E-025). h_g0 = 2501 kJ/kg (E-006) converts latent heat to water,
-    consistent with the ASHRAE moist-air enthalpy formula used in core.psychro.
+    the total E-025); T_in [degC] cabin temperature. With T_in the vapour enters
+    at the cabin vapour enthalpy, so the latent gain n * latent_W is conserved
+    exactly in the total-enthalpy balance. Without T_in, h_g0 (0 degC) is used.
     """
     _non_negative(n=n, sensible_W=sensible_W, latent_W=latent_W)
-    h_g0 = registry.number("E-006", "kJ/kg") * J_PER_KJ
-    return n * sensible_W, n * latent_W / h_g0
+    h_g = vapour_enthalpy(0.0 if T_in is None else T_in)
+    return n * sensible_W, n * latent_W / h_g
 
 
 def fresh_air(
@@ -102,9 +115,11 @@ def fresh_air(
 
         W_out  = humidity_ratio(T_out, RH_out, p)
         m_da   = volume_flow / 3600 / v(T_out, W_out, p)        [kg dry air/s]
-        Q_sens = m_da * (h(T_out, W_in)  - h(T_in, W_in))
-        Q_lat  = m_da * (h(T_out, W_out) - h(T_out, W_in))
+        Q_sens = m_da * (h(T_out, W_out) - h(T_in, W_out))
+        Q_lat  = m_da * (W_out - W_in) * h_g(T_in)
         m_w    = m_da * (W_out - W_in)
+
+    (see ``supply_air`` for the sensible/latent convention).
 
     Q_sens + Q_lat = m_da * (h_out - h_in). volume_flow_m3_h [m3/h] is taken at
     outside-air conditions (UIC 553 per-seat rate: E-028). p [Pa] defaults to
@@ -124,15 +139,19 @@ def supply_air(
     m_da [kg dry air/s] enters at (T_supply, W_supply) and the same mass leaves
     at the interior state (T_in, W_in). With h(T, W) from core.psychro.enthalpy:
 
-        Q_sens = m_da * (h(T_supply, W_in) - h(T_in, W_in))
-        Q_lat  = m_da * (h(T_supply, W_supply) - h(T_supply, W_in))
+        Q_sens = m_da * (h(T_supply, W_supply) - h(T_in, W_supply))
         m_w    = m_da * (W_supply - W_in)
+        Q_lat  = m_w * h_g(T_in)  =  m_da * (h_supply - h_in) - Q_sens
 
-    Negative values mean cooling / dehumidifying. Used for fresh air
-    (``fresh_air``) and for the HVAC unit's supply air (core.coach unit mode).
+    The sensible part is evaluated at the stream's own humidity W_supply (the
+    vapour that is heated or cooled is the stream's), and the latent part is the
+    vapour added at the cabin vapour enthalpy h_g(T_in). Hence
+    Q_sens + Q_lat = m_da (h_supply - h_in) exactly, which closes the cabin's
+    total-enthalpy balance. Negative values mean cooling / dehumidifying. Used
+    for fresh air (``fresh_air``) and the HVAC supply air (core.coach unit mode).
     """
     _non_negative(m_da=m_da)
-    h_sup_Win = psychro.enthalpy(T_supply, W_in)
-    Q_sens = m_da * (h_sup_Win - psychro.enthalpy(T_in, W_in))
-    Q_lat = m_da * (psychro.enthalpy(T_supply, W_supply) - h_sup_Win)
-    return Q_sens, Q_lat, m_da * (W_supply - W_in)
+    h_sup = psychro.enthalpy(T_supply, W_supply)
+    Q_sens = m_da * (h_sup - psychro.enthalpy(T_in, W_supply))
+    Q_total = m_da * (h_sup - psychro.enthalpy(T_in, W_in))
+    return Q_sens, Q_total - Q_sens, m_da * (W_supply - W_in)

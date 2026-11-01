@@ -1,0 +1,40 @@
+# Steady comfort test, climatic zone I.
+# Solar pairing: E-013 is the UIC 553-1 Zone I value for 40 degC outside,
+# while the EN 13129 Zone I outside temperature is 45 degC (E-022).
+# The pairing is to be confirmed against both standards.
+name: Steady comfort, zone I
+standard: EN 13129:2016 / UIC 553-1
+clause: to confirm
+facility: vehicle_chamber
+description: >-
+  Chamber at the EN 13129 zone I outside temperature (E-022) with UIC 553-1
+  solar load (E-013), full passenger load, unit cooling at full load (no
+  controller until piece 7). Pass if the cabin mean is inside the comfort
+  band E-024.
+
+parameters:
+  max_settle:
+    user_defined: 48
+    unit: h
+    note: Practical limit to reach steady state.
+
+initial_state: soaked
+stability: {signal: cabin_T, window: E-072, max_drift: E-073}
+
+steps:
+  - set_conditions:
+      chamber_T: E-022
+      chamber_RH: E-071
+      solar: {intensity: E-013, vertical_factor: E-021, absorptance: E-030,
+              g_value: E-031, h_o: E-029, surfaces: [roof, left_side]}
+      passengers: {count: E-039, sensible_W: E-026, latent_W: E-027}
+      unit: {mode: cooling, part_load: full}
+  - hold_until_stable: {max_duration: param:max_settle}
+  - measure: {duration: E-074}
+
+measured_quantities: [cabin_T_mean, cabin_RH_mean, chamber_T_mean]
+
+acceptance:
+  - name: cabin mean temperature within the comfort band
+    quantity: cabin_T_mean
+    within_band: E-024

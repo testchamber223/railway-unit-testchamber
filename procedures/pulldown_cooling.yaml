@@ -1,0 +1,42 @@
+# Pull-down: soak the closed coach at the Zone I outside temperature with sun,
+# then run the unit at full load and record the time to reach the setpoint.
+name: Pull-down (cooling)
+standard: EN 13129:2016
+clause: to confirm
+facility: vehicle_chamber
+description: >-
+  Soak at E-022 with UIC 553-1 solar load (E-013 on the roof, x E-021 on the
+  side), unit off; then unit at full load (no controller until piece 7) until
+  the cabin is within E-068 +/- E-069. Pass if that takes at most E-070.
+
+parameters:
+  max_soak:
+    user_defined: 48
+    unit: h
+    note: Practical limit for the soak; the test is invalid if not stable by then.
+  max_pulldown:
+    user_defined: 6
+    unit: h
+    note: Practical limit for the pull-down run.
+
+initial_state: soaked
+stability: {signal: cabin_T, window: E-072, max_drift: E-073}
+
+steps:
+  - set_conditions:
+      chamber_T: E-022
+      chamber_RH: E-071
+      solar: {intensity: E-013, vertical_factor: E-021, absorptance: E-030,
+              g_value: E-031, h_o: E-029, surfaces: [roof, left_side]}
+      unit: {mode: "off"}
+  - hold_until_stable: {max_duration: param:max_soak}
+  - set_conditions:
+      unit: {mode: cooling, part_load: full}
+  - run_until: {signal: cabin_T, target: E-068, tolerance: E-069, max_duration: param:max_pulldown}
+
+measured_quantities: [time_to_setpoint_h]
+
+acceptance:
+  - name: time to reach the setpoint
+    quantity: time_to_setpoint_h
+    at_most: E-070

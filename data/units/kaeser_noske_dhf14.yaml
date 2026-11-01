@@ -15,6 +15,8 @@ rating_outdoor_dry_bulb:
   {value: 35, unit: degC, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
 rating_indoor_dry_bulb:
   {value: null, unit: degC, status: assumption}
+rating_reference:
+  {value: null, unit: "-", status: assumption}
 rating_indoor_wet_bulb:
   {value: null, unit: degC, status: assumption}
 supply_airflow:

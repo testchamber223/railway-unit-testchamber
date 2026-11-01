@@ -23,8 +23,14 @@ W_OUT = psychro.humidity_ratio(T_OUT, RH_OUT)
 HOURS = 3600.0
 
 
+N_PAX, Q_PAX_SENS, Q_PAX_LAT = 80, 70.0, 50.0
+
+
 def passengers():
-    return LoadTerm("passengers", lambda t, T, W: loads.passengers(80, 70.0, 50.0))
+    # T_in passed: water enters at the cabin vapour enthalpy, so the latent gain
+    # N_PAX * Q_PAX_LAT is conserved exactly in the total-enthalpy balance.
+    return LoadTerm("passengers",
+                    lambda t, T, W: loads.passengers(N_PAX, Q_PAX_SENS, Q_PAX_LAT, T_in=T))
 
 
 def run(load_terms, mode="cooling", part_load=1.0, T0=45.0, W0=W_OUT, t_end=12 * HOURS,
@@ -54,7 +60,7 @@ def integral(df, y):
 
 def test_pulldown_cools_the_coach(pulldown):
     T = pulldown["T_C"]
-    assert T.iloc[0] == 45.0
+    assert T.iloc[0] == pytest.approx(45.0, abs=1e-9)   # solver output at t = 0
     assert T.iloc[-1] < 30.0
     assert (T.diff().iloc[1:] <= 1e-9).all()          # monotonic cool-down
     assert (pulldown["unit_T_supply_C"] < T).all()
@@ -90,14 +96,49 @@ def test_unit_moisture_identity(pulldown):
     np.testing.assert_allclose(lhs, rhs, rtol=1e-9, atol=1e-12)
 
 
+def test_total_enthalpy_balance_closes(pulldown):
+    """PRIMARY CHECK: whole-system total enthalpy over the pull-down.
+
+    Inflow  = envelope + passenger sensible + passenger latent
+              + supply-air total enthalpy m_s (h_supply - h_cabin)
+              (the supply term carries coil, fan and fresh air -- see the
+              unit identity test).
+    Storage = C dT  +  M_da h_g(T) dW   (sensible store + water vapour added).
+    """
+    df = pulldown
+    inflow = (df["Q_env_W"] + df["Q_load_passengers_W"] + N_PAX * Q_PAX_LAT
+              + df["unit_Q_supply_total_W"])
+    T, W = df["T_C"].to_numpy(), df["W_kg_kg"].to_numpy()
+    h_g = np.array([loads.vapour_enthalpy(Ti) for Ti in T])
+    latent_store = df.attrs["M_da_kg"] * np.sum(0.5 * (h_g[1:] + h_g[:-1]) * np.diff(W))
+    sensible_store = COACH.heat_capacity_J_K * (T[-1] - T[0])
+    assert integral(df, inflow) == pytest.approx(sensible_store + latent_store, rel=1e-3)
+
+
+def test_steady_state_total_enthalpy(pulldown):
+    # coil total = envelope + passengers (sensible + latent) + fresh-air enthalpy + fan
+    e = pulldown.iloc[-1]
+    loads_total = (e["Q_env_W"] + e["Q_load_passengers_W"] + N_PAX * Q_PAX_LAT
+                   + e["unit_Q_fresh_enthalpy_W"] + e["unit_Q_fan_W"])
+    assert e["unit_Q_coil_total_W"] == pytest.approx(loads_total, rel=1e-3)
+
+
 def test_steady_state_coil_sensible_equals_loads_plus_fan(pulldown):
+    """Coil and cabin sensible heat on the SAME humidity reference, W_supply.
+
+    Coil sensible:  m_s (h(T_coil_in, W_s) - h(T_coil_out, W_s))     [W_s = coil outlet]
+    Cabin sensible from supply: m_s (h(T_s, W_s) - h(T_cabin, W_s))
+    Mixing-box sensible (fresh air):  m_s (h(T_mix, W_s) - h(T_cabin, W_s))
+    At steady state: coil sensible = envelope + passenger sensible
+                                     + mixing-box sensible + fan heat.
+    """
     e = pulldown.iloc[-1]
     assert abs(e["Q_env_W"] + e["Q_load_passengers_W"] + e["Q_load_unit_supply_W"]) \
         < 1e-3 * e["unit_Q_coil_sensible_W"]          # steady: dT/dt ~ 0
-    Tz, Wz = e["T_C"], e["W_kg_kg"]
-    fresh_sensible = e["unit_m_fresh_kg_s"] * (psychro.enthalpy(T_OUT, Wz)
-                                               - psychro.enthalpy(Tz, Wz))
-    sensible_loads = e["Q_env_W"] + e["Q_load_passengers_W"] + fresh_sensible
+    W_s, m_s = e["unit_W_supply_kg_kg"], e["unit_m_supply_kg_s"]
+    mixing_sensible = m_s * (psychro.enthalpy(e["unit_T_mixed_C"], W_s)
+                             - psychro.enthalpy(e["T_C"], W_s))
+    sensible_loads = e["Q_env_W"] + e["Q_load_passengers_W"] + mixing_sensible
     assert e["unit_Q_coil_sensible_W"] == pytest.approx(sensible_loads + e["unit_Q_fan_W"],
                                                         rel=5e-3)
 

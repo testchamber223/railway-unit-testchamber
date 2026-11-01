@@ -46,6 +46,8 @@ LIMITS_ID = "E-048"
 SHR_FALLBACK_ID = "E-050"
 
 FanPosition = Literal["draw-through", "blow-through"]
+RatingReference = Literal["coil_inlet", "return_air_with_fresh_air"]
+RATING_REFERENCES = ("coil_inlet", "return_air_with_fresh_air")
 Mode = Literal["cooling", "heating", "ventilation"]
 
 # Numerics (not physics)
@@ -99,6 +101,9 @@ CARD_FIELDS: dict[str, tuple[str, bool]] = {
     "rating_indoor_dry_bulb": ("degC", True),
     "rating_indoor_wet_bulb": ("degC", False),   # wet-bulb OR RH required
     "rating_indoor_rh": ("-", False),
+    "rating_reference": ("text", True),          # coil_inlet | return_air_with_fresh_air
+    "rating_fresh_air_fraction": ("-", False),   # needed for return_air_with_fresh_air
+    "rating_outdoor_rh": ("-", False),           # needed for return_air_with_fresh_air
     "rated_sensible_capacity": ("W", False),     # or SHR; else evidence E-050
     "rated_shr": ("-", False),
     "supply_airflow": ("m3/s", True),
@@ -133,6 +138,9 @@ class UnitCard(BaseModel):
     rating_indoor_dry_bulb: CardField | None = None
     rating_indoor_wet_bulb: CardField | None = None
     rating_indoor_rh: CardField | None = None
+    rating_reference: CardField | None = None
+    rating_fresh_air_fraction: CardField | None = None
+    rating_outdoor_rh: CardField | None = None
     rated_sensible_capacity: CardField | None = None
     rated_shr: CardField | None = None
     supply_airflow: CardField | None = None
@@ -157,6 +165,9 @@ class UnitCard(BaseModel):
                 raise ValueError(f"{name}: unit {f.unit!r} cannot be converted to {si}")
             elif f.value is not None and not isinstance(f.value, float | int):
                 raise ValueError(f"{name}: expected a number, got {f.value!r}")
+        if self.rating_reference is not None and self.rating_reference.value is not None \
+                and self.rating_reference.value not in RATING_REFERENCES:
+            raise ValueError(f"rating_reference must be one of {RATING_REFERENCES}")
         if self.fan_position is not None and self.fan_position.value is not None \
                 and self.fan_position.value not in ("draw-through", "blow-through"):
             raise ValueError("fan_position must be 'draw-through' or 'blow-through'")
@@ -186,6 +197,10 @@ class UnitCard(BaseModel):
         wb, rh = self.rating_indoor_wet_bulb, self.rating_indoor_rh
         if wb is None and rh is None:
             items.append(("rating_indoor_wet_bulb / rating_indoor_rh", "missing (one is required)"))
+        if self.si("rating_reference") == "return_air_with_fresh_air":
+            for name in ("rating_fresh_air_fraction", "rating_outdoor_rh"):
+                if getattr(self, name) is None:
+                    items.append((name, "missing (required for return_air_with_fresh_air)"))
         if self.rated_shr is None and self.rated_sensible_capacity is None:
             items.append(("rated_shr / rated_sensible_capacity",
                           f"not on datasheet; falls back to evidence {SHR_FALLBACK_ID}"))
@@ -368,7 +383,7 @@ class DXUnit:
     name: str
     Q_rated_W: float
     T_rating_out_C: float
-    T_rating_in_C: float
+    T_rating_in_C: float          # COIL-INLET state at rating (derived for return-air rating)
     W_rating_in: float
     shr_rated: float
     V_supply_m3_s: float
@@ -379,6 +394,10 @@ class DXUnit:
     coefficients: tuple[float, ...]
     limits: CurveLimits | None = None
     p: float | None = None
+    rating_reference: RatingReference = "coil_inlet"
+    rating_fresh_fraction: float = 0.0
+    T_rating_return_C: float | None = None    # card's indoor (return-air) rating state
+    W_rating_return: float | None = None
 
     @classmethod
     def from_card(cls, card: UnitCard, evidence: Registry | None = None,
@@ -387,6 +406,15 @@ class DXUnit:
 
         ``limits="evidence"`` reads E-048 (None while empty); pass a
         ``CurveLimits`` or None to override.
+
+        Rating reference (card field ``rating_reference``):
+          * ``coil_inlet``: the card's indoor rating condition IS the coil inlet.
+          * ``return_air_with_fresh_air``: the card's indoor condition is the
+            return air; the coil inlet is the adiabatic mix with outdoor air
+            (rating_outdoor_dry_bulb / rating_outdoor_rh) at
+            ``rating_fresh_air_fraction`` (taken as a dry-air mass fraction),
+            plus fan heat for a blow-through fan. The rated capacity is taken as
+            the coil's total capacity at that coil-inlet state.
 
         Raises:
             MissingEvidenceError: lists every card field (and evidence ID) that
@@ -411,6 +439,13 @@ class DXUnit:
         P_fan = need("fan_power")
         fan_pos = need("fan_position")
         Q_heat = need("heating_capacity")
+        ref = need("rating_reference")
+        frac = rh_out = None
+        if ref == "return_air_with_fresh_air":
+            frac = need("rating_fresh_air_fraction")
+            rh_out = need("rating_outdoor_rh")
+            if frac is not None and not 0 <= frac < 1:
+                raise ValueError(f"rating_fresh_air_fraction={frac} must be in [0, 1)")
 
         shr = card.si("rated_shr")
         if shr is None and card.si("rated_sensible_capacity") is not None and Q:
@@ -430,12 +465,23 @@ class DXUnit:
 
         W_in = (psychro.humidity_ratio_from_wet_bulb(T_in, wb) if wb is not None
                 else psychro.humidity_ratio(T_in, rh))
+        T_coil, W_coil = T_in, W_in
+        if ref == "return_air_with_fresh_air":
+            W_out_r = psychro.humidity_ratio(T_out, rh_out)
+            mix = mixing_box(AirState(T_in, W_in, 1.0 - frac), AirState(T_out, W_out_r, frac))
+            T_coil, W_coil = mix.T_C, mix.W
+            if fan_pos == "blow-through":
+                m = V_sup / psychro.specific_volume(T_coil, W_coil)
+                heated = add_sensible_heat(AirState(T_coil, W_coil, m), P_fan)
+                T_coil, W_coil = heated.T_C, heated.W
         return cls(
-            name=card.name, Q_rated_W=Q, T_rating_out_C=T_out, T_rating_in_C=T_in,
-            W_rating_in=W_in, shr_rated=shr, V_supply_m3_s=V_sup, V_fresh_m3_s=V_fresh,
+            name=card.name, Q_rated_W=Q, T_rating_out_C=T_out, T_rating_in_C=T_coil,
+            W_rating_in=W_coil, shr_rated=shr, V_supply_m3_s=V_sup, V_fresh_m3_s=V_fresh,
             P_fan_W=P_fan, fan_position=fan_pos, Q_heat_W=Q_heat,
             coefficients=curve_coefficients(evidence),
             limits=curve_limits(evidence) if limits == "evidence" else limits,
+            rating_reference=ref, rating_fresh_fraction=frac or 0.0,
+            T_rating_return_C=T_in, W_rating_return=W_in,
         )
 
     # ---- derived rating quantities ---------------------------------------
@@ -548,18 +594,25 @@ class DXUnit:
         return add_sensible_heat(air, Q), Q
 
     def operate(self, T_return: float, W_return: float, T_fresh: float, W_fresh: float,
-                Tdb_out: float, mode: Mode, part_load: float) -> UnitResult:
+                Tdb_out: float, mode: Mode, part_load: float,
+                fresh_fraction: float | None = None) -> UnitResult:
         """Whole unit: mixing box -> (fan) -> coil -> (fan) -> heater.
 
         Supply mass flow is constant (m_supply_kg_s); fresh dry-air mass flow is
-        V_fresh / v(fresh state); return = supply - fresh. Fan heat P_fan is
+        V_fresh / v(fresh state), or fresh_fraction * supply when given (test
+        rooms); return = supply - fresh. Fan heat P_fan is
         added to the air before the coil (blow-through) or after it
         (draw-through), assuming the motor is in the air stream.
         """
         if mode not in ("cooling", "heating", "ventilation"):
             raise ValueError(f"unknown mode {mode!r}")
         m_s = self.m_supply_kg_s
-        m_f = self.V_fresh_m3_s / psychro.specific_volume(T_fresh, W_fresh, self.p)
+        if fresh_fraction is None:
+            m_f = self.V_fresh_m3_s / psychro.specific_volume(T_fresh, W_fresh, self.p)
+        else:            # test rooms impose a dry-air mass fraction of fresh air
+            if not 0 <= fresh_fraction < 1:
+                raise ValueError(f"fresh_fraction={fresh_fraction} must be in [0, 1)")
+            m_f = fresh_fraction * m_s
         if m_f > m_s:
             raise ValueError("fresh airflow exceeds supply airflow")
         air = mixing_box(AirState(T_return, W_return, m_s - m_f), AirState(T_fresh, W_fresh, m_f))

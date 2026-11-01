@@ -1,0 +1,25 @@
+# Unit cooling capacity at the unit card's own rating condition, measured by
+# the air-enthalpy method in the unit test room.
+name: Unit cooling capacity at rating condition
+standard: ASHRAE 37 / EN 14511-3
+clause: to confirm
+facility: unit_room
+description: >-
+  Indoor and outdoor rooms at the datasheet rating condition; the coil inlet
+  follows the card's rating_reference (fresh-air fraction from the card for
+  return_air_with_fresh_air, none for coil_inlet).
+
+steps:
+  - set_conditions:
+      indoor: {T: card:rating_indoor_dry_bulb, wet_bulb: card:rating_indoor_wet_bulb}
+      outdoor: {T: card:rating_outdoor_dry_bulb, RH: card:rating_outdoor_rh}
+      fresh_fraction: from_rating_reference
+      unit: {mode: cooling, part_load: full}
+  - measure: {duration: E-076}
+
+measured_quantities: [capacity_gross_W, capacity_net_W, sensible_capacity_gross_W]
+
+acceptance:
+  - name: gross capacity matches the datasheet
+    quantity: capacity_gross_W
+    within_relative: {target: card:rated_total_cooling_capacity, tolerance: E-075}

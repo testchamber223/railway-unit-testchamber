@@ -1,0 +1,40 @@
+# k-value test, heater method -- port of core.procedures.k_value_test.
+# Closed coach, HVAC off, constant heater power inside; chamber at E-010.
+# Steady when a full E-011 window has |dT/dt| < E-032; k from the means over
+# the last E-033 of the run. Test conditions checked against E-009 / E-010.
+name: k-value test, heater method
+standard: UIC 553-1, 2nd ed. 2005
+clause: 7.2.3 (confirm against the PDF)
+facility: vehicle_chamber
+description: Measure the coach k-value with internal heaters in a cold chamber.
+
+parameters:
+  heater_power:
+    user_defined: 9000
+    unit: W
+    note: Heater power inside the coach; choose it so T_in - T_out is near E-009.
+  test_duration:
+    user_defined: 40
+    unit: h
+    note: Total run time; must exceed the time to steady state plus the E-011 window.
+
+initial_state: soaked
+stability: {signal: cabin_T, window: E-011, max_drift: E-032}
+
+steps:
+  - set_conditions:
+      chamber_T: E-010
+      heater_W: param:heater_power
+      unit: {mode: "off"}
+  - hold: {duration: param:test_duration, require_stable_end: true}
+  - measure: {duration: E-033, window: trailing}
+
+measured_quantities: [k_value, dT_cabin_chamber_mean, chamber_T_mean, cabin_T_mean]
+
+acceptance:
+  - name: temperature difference within the UIC 553-1 range
+    quantity: dT_cabin_chamber_mean
+    within_band: E-009
+  - name: chamber temperature within the UIC 553-1 range
+    quantity: chamber_T_mean
+    within_band: E-010

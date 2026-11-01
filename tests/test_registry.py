@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from evidence import registry
-from evidence.registry import (COLUMNS, EvidenceError, MissingEvidenceError, Registry,
-                               Status)
+from evidence.registry import (COLUMNS, EvidenceError, MissingEvidenceError,
+                               PlotOnlyEvidenceError, Registry, Status)
 
 HEADER = ",".join(COLUMNS)
 DOCS = Path(__file__).parents[1] / "docs" / "README.md"
@@ -127,3 +127,27 @@ def test_every_open_item_is_listed_in_docs():
 def test_unknown_id_raises():
     with pytest.raises(KeyError, match="E-999"):
         registry.get("E-999")
+
+
+def test_plot_only_value_is_refused_for_calculations():
+    with pytest.raises(PlotOnlyEvidenceError, match="plot-only"):
+        registry.get("E-051")
+    with pytest.raises(PlotOnlyEvidenceError):
+        registry.number("E-051", "degC")
+    assert registry.get("E-051", allow_plot_only=True).value == 19.4
+    assert registry.get("E-051", allow_plot_only=True).record.is_open
+
+
+def test_plot_only_needs_a_value(tmp_path):
+    with pytest.raises(EvidenceError, match="plot-only"):
+        Registry(write_csv(tmp_path, "E-001,A,a,,,degC,,,plot-only assumption,"))
+
+
+def test_overrides_are_labelled_and_do_not_touch_the_csv():
+    reg = Registry().with_overrides({"E-062": 0.5}, label="verification-only")
+    rec = reg.get("E-062").record
+    assert rec.value == 0.5 and rec.override == "verification-only" and rec.is_open
+    assert [r.id for r in reg.overrides()] == ["E-062"]
+    assert Registry().get("E-062").value is None
+    with pytest.raises(ValueError):
+        Registry().with_overrides({"E-062": 0.5}, label="")

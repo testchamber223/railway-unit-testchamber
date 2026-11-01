@@ -1,0 +1,49 @@
+# Example of a client-defined test. Every value is user-defined: nothing here
+# claims to come from a standard. Change the parameters (in this file, or with
+# run_procedure(..., parameters={"outside_T": 40.0})) to define your own test.
+name: Client test - hot humid day, part load
+standard: client specification (user-defined)
+clause: n/a
+facility: vehicle_chamber
+description: Hot humid day, 60 passengers, sun on roof and both sides, unit at 80 %.
+
+parameters:
+  outside_T:    {user_defined: 38.0, unit: degC, note: client design day}
+  outside_RH:   {user_defined: 0.50, unit: "-", note: client design day}
+  sun:          {user_defined: 650.0, unit: W/m2, note: client solar intensity}
+  side_factor:  {user_defined: 0.866, unit: "-", note: client vertical-surface factor}
+  absorptance:  {user_defined: 0.6, unit: "-"}
+  g_value:      {user_defined: 0.5, unit: "-"}
+  h_o:          {user_defined: 17.0, unit: W/m2K}
+  passengers:   {user_defined: 60, unit: "-"}
+  pax_sensible: {user_defined: 75.0, unit: W/person}
+  pax_latent:   {user_defined: 45.0, unit: W/person}
+  unit_load:    {user_defined: 0.8, unit: "-", note: fixed part load (no controller yet)}
+  window:       {user_defined: 1.0, unit: h, note: stability window}
+  drift:        {user_defined: 0.2, unit: K/h, note: stability criterion}
+  settle:       {user_defined: 24, unit: h}
+  measure:      {user_defined: 1.0, unit: h}
+  target:       {user_defined: 26.0, unit: degC, tolerance: 1.5, note: client comfort band}
+
+initial_state: soaked
+stability: {signal: cabin_T, window: param:window, max_drift: param:drift}
+
+steps:
+  - set_conditions:
+      chamber_T: param:outside_T
+      chamber_RH: param:outside_RH
+      solar: {intensity: param:sun, vertical_factor: param:side_factor,
+              absorptance: param:absorptance, g_value: param:g_value, h_o: param:h_o,
+              surfaces: [roof, left_side, right_side]}
+      passengers: {count: param:passengers, sensible_W: param:pax_sensible,
+                   latent_W: param:pax_latent}
+      unit: {mode: cooling, part_load: param:unit_load}
+  - hold_until_stable: {max_duration: param:settle}
+  - measure: {duration: param:measure}
+
+measured_quantities: [cabin_T_mean, cabin_RH_mean, chamber_T_mean]
+
+acceptance:
+  - name: cabin within the client comfort band
+    quantity: cabin_T_mean
+    within_band: param:target

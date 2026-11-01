@@ -1,0 +1,45 @@
+# VERIFICATION-ONLY stand-in values for evidence rows that are still empty.
+# Applied with Registry().with_overrides(values, label="verification-only");
+# every TestResult lists them as overrides. These are round numbers chosen to
+# exercise the code -- NOT data for any real coach, unit, facility or standard.
+
+# reference coach geometry and loads (E-034..E-041, E-026/27, E-029..E-031)
+E-034: 24.0      # interior length, m
+E-035: 2.8       # interior width, m
+E-036: 2.2       # interior height, m
+E-037: 300.0     # Ae, m2
+E-038: 12.0      # glazing per side, m2
+E-039: 80        # seats
+E-040: 5.0e6     # effective heat capacity, J/K
+E-041: 2000.0    # equipment, W
+E-026: 70.0      # passenger sensible, W/person
+E-027: 50.0      # passenger latent, W/person
+E-029: 17.0      # h_o, W/m2K
+E-030: 0.6       # opaque absorptance
+E-031: 0.5       # glazing g-value
+# unit test room (E-052..E-057) and sensors (E-058..E-060)
+E-052: 0.3
+E-053: 0.03
+E-054: 0.3
+E-055: 0.03
+E-056: 60000.0
+E-057: 60000.0
+E-058: 0.1       # temperature sensor, +/- K
+E-059: 0.02      # RH sensor, +/-
+E-060: 0.02      # airflow, +/- relative
+# vehicle chamber (E-062..E-066)
+E-062: 1.0
+E-063: 0.05
+E-064: 150000.0
+E-065: 150000.0
+E-066: 10.0      # K/h
+# procedure criteria (E-068..E-076)
+E-068: 27.0      # pull-down setpoint, degC
+E-069: 1.0       # setpoint tolerance, K
+E-070: 2.0       # max time to setpoint, h
+E-071: 0.40      # chamber RH for cooling tests
+E-072: 1.0       # stability window, h
+E-073: 0.2       # stability drift, K/h
+E-074: 1.0       # comfort measurement, h
+E-075: 0.05      # capacity acceptance, relative
+E-076: 0.5       # capacity measurement, h

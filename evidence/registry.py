@@ -14,13 +14,17 @@ Validation rules (enforced on load):
     * ``value`` is a number, or text for definitions (e.g. E-008).
     * ``tolerance`` (optional, same unit as ``value``) is a symmetric +/- band.
     * ``id`` values must be unique.
+    * Status ``plot-only assumption`` marks a value that exists only to draw
+      an illustration. ``get``/``number`` refuse it unless called with
+      ``allow_plot_only=True``, so no procedure or report can use it.
 """
 
 from __future__ import annotations
 
+import copy
 import csv
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
@@ -50,12 +54,21 @@ class MissingEvidenceError(EvidenceError):
         super().__init__(message)
 
 
+class PlotOnlyEvidenceError(EvidenceError):
+    """Raised when a 'plot-only assumption' is requested for a calculation."""
+
+
 class Status(StrEnum):
     STANDARD = "standard"
     DATASHEET = "datasheet"
     LITERATURE = "literature"
     CALCULATED = "calculated"
     ASSUMPTION = "assumption"
+    PLOT_ONLY = "plot-only assumption"
+
+
+# Statuses that are not sourced: source may be empty; listed as open items.
+UNSOURCED = (Status.ASSUMPTION, Status.PLOT_ONLY)
 
 
 def _parse_number_or_text(v: object) -> object:
@@ -85,6 +98,7 @@ class EvidenceRecord(BaseModel):
     clause_or_page: str = ""
     status: Status
     notes: str = ""
+    override: str = ""   # set by Registry.with_overrides (e.g. "verification-only")
 
     @field_validator("value", "tolerance", mode="before")
     @classmethod
@@ -100,7 +114,9 @@ class EvidenceRecord(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> EvidenceRecord:
-        if self.status is not Status.ASSUMPTION:
+        if self.status is Status.PLOT_ONLY and self.value is None:
+            raise ValueError(f"{self.id}: a plot-only assumption needs a value")
+        if self.status not in UNSOURCED:
             if not self.source:
                 raise ValueError(
                     f"{self.id}: empty source is only allowed for status 'assumption'"
@@ -120,7 +136,7 @@ class EvidenceRecord(BaseModel):
     def is_open(self) -> bool:
         """True if the record is an assumption or still flagged 'to confirm'."""
         text = f"{self.clause_or_page} {self.notes}".lower()
-        return self.status is Status.ASSUMPTION or "confirm" in text
+        return self.status in UNSOURCED or bool(self.override) or "confirm" in text
 
 
 class Evidence(NamedTuple):
@@ -157,12 +173,46 @@ class Registry:
                 records[rec.id] = rec
         return records
 
-    def get(self, evidence_id: str) -> Evidence:
+    def get(self, evidence_id: str, *, allow_plot_only: bool = False) -> Evidence:
+        """Value, unit and record of ``evidence_id``.
+
+        Raises:
+            KeyError: unknown id.
+            PlotOnlyEvidenceError: the record is a 'plot-only assumption' and
+                ``allow_plot_only`` is False (only illustrations may pass True).
+        """
         try:
             rec = self._records[evidence_id]
         except KeyError:
             raise KeyError(f"Unknown evidence id {evidence_id!r}") from None
+        if rec.status is Status.PLOT_ONLY and not allow_plot_only:
+            raise PlotOnlyEvidenceError(
+                f"{evidence_id} ({rec.name}) is a plot-only assumption and cannot be used "
+                f"in a calculation, procedure or report"
+            )
         return Evidence(rec.value, rec.unit, rec)
+
+    def with_overrides(self, values: Mapping[str, float | str], label: str) -> Registry:
+        """A copy of this registry with some values replaced and marked ``label``.
+
+        Used to run verification cases with explicitly labelled stand-in values
+        (e.g. ``label="verification-only"``) instead of writing invented
+        numbers into evidence.csv. Overridden records keep their id, name and
+        unit, carry ``override=label`` and are reported as open items.
+        """
+        if not label:
+            raise ValueError("an override label is required")
+        new = copy.copy(self)
+        new._records = dict(self._records)
+        for evidence_id, value in values.items():
+            rec = self.get(evidence_id).record
+            new._records[evidence_id] = EvidenceRecord.model_validate(
+                {**rec.model_dump(), "value": value, "override": label})
+        return new
+
+    def overrides(self) -> list[EvidenceRecord]:
+        """Records whose value was replaced by ``with_overrides``."""
+        return [r for r in self._records.values() if r.override]
 
     def number(self, evidence_id: str, unit: str) -> float:
         """Numeric value of ``evidence_id``, checking that its unit is ``unit``.
@@ -182,7 +232,7 @@ class Registry:
         return rec.value
 
     def list_assumptions(self) -> list[EvidenceRecord]:
-        return [r for r in self._records.values() if r.status is Status.ASSUMPTION]
+        return [r for r in self._records.values() if r.status in UNSOURCED]
 
     def list_open_items(self) -> list[EvidenceRecord]:
         """Records still marked assumption or 'to confirm' / 'confirm against the PDF'."""
@@ -202,9 +252,9 @@ def _registry() -> Registry:
     return _default
 
 
-def get(evidence_id: str) -> Evidence:
+def get(evidence_id: str, *, allow_plot_only: bool = False) -> Evidence:
     """Return value, unit and full record for ``evidence_id`` from the default CSV."""
-    return _registry().get(evidence_id)
+    return _registry().get(evidence_id, allow_plot_only=allow_plot_only)
 
 
 def number(evidence_id: str, unit: str) -> float:

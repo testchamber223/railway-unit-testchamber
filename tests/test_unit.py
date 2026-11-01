@@ -33,8 +33,9 @@ def unit():
 def test_dhf14_card_reports_missing_fields():
     card = load_unit_card("kaeser_noske_dhf14")
     open_fields = dict(card.open_items())
-    for name in ["rating_indoor_dry_bulb", "rating_indoor_wet_bulb", "fresh_airflow",
-                 "compressor_power", "fan_power", "fan_position", "refrigerant"]:
+    for name in ["rating_indoor_dry_bulb", "rating_indoor_wet_bulb", "rating_reference",
+                 "fresh_airflow", "compressor_power", "fan_power", "fan_position",
+                 "refrigerant"]:
         assert open_fields[name] == "assumption (value empty)", name
     assert "E-050" in open_fields["rated_shr / rated_sensible_capacity"]
     # datasheet values are present and converted to SI
@@ -43,14 +44,15 @@ def test_dhf14_card_reports_missing_fields():
     assert card.si("heating_capacity") == pytest.approx(4500.0)
     assert card.si("heating_rating_outdoor_dry_bulb") == -20.0
     assert "rated_total_cooling_capacity" not in open_fields
-    assert "8 open datasheet item(s)" in card.report()
+    assert "9 open datasheet item(s)" in card.report()
 
 
 def test_dhf14_model_refuses_to_run_and_lists_fields():
     with pytest.raises(MissingEvidenceError) as exc:
         DXUnit.from_card(load_unit_card("kaeser_noske_dhf14"))
     for name in ["rating_indoor_dry_bulb", "rating_indoor_wet_bulb / rating_indoor_rh",
-                 "fresh_airflow", "fan_power", "fan_position", "rated SHR (E-050 empty)"]:
+                 "fresh_airflow", "fan_power", "fan_position", "rating_reference",
+                 "rated SHR (E-050 empty)"]:
         assert name in exc.value.ids
     assert "rated_total_cooling_capacity" not in exc.value.ids
 
@@ -259,3 +261,69 @@ def test_ventilation_mode_only_adds_fan_heat(unit):
     m = res.supply.m_da
     assert m * (psychro.enthalpy(res.supply.T_C, W) - psychro.enthalpy(25.0, W)) == \
         pytest.approx(unit.P_fan_W, rel=1e-9)
+
+
+# --------------------------------------------------------------------------
+# Rating reference: coil inlet vs. return air with fresh air
+# --------------------------------------------------------------------------
+
+def _return_air_card(fan_position="draw-through"):
+    return UnitCard.model_validate(_card_dict(
+        rating_reference={"value": "return_air_with_fresh_air", "unit": "-",
+                          "source": "verification-only", "status": "assumption"},
+        rating_fresh_air_fraction={"value": 20, "unit": "%", "source": "verification-only",
+                                   "status": "assumption"},
+        fan_position={"value": fan_position, "unit": "-", "source": "verification-only",
+                      "status": "assumption"},
+    ))
+
+
+def test_coil_inlet_reference_uses_card_state_directly(unit):
+    assert unit.rating_reference == "coil_inlet"
+    assert unit.T_rating_in_C == unit.T_rating_return_C == 26.7
+    assert unit.Twb_rating_C == pytest.approx(19.4, abs=1e-9)
+
+
+@pytest.mark.parametrize("fan_position", ["draw-through", "blow-through"])
+def test_return_air_reference_normalises_at_mixed_coil_inlet(fan_position):
+    u = DXUnit.from_card(_return_air_card(fan_position))
+    # coil inlet at rating = 80 % return (26.7 / 19.4 wb) + 20 % outdoor (35 / 40 %)
+    W_ret = psychro.humidity_ratio_from_wet_bulb(26.7, 19.4)
+    mix = mixing_box(AirState(26.7, W_ret, 0.8),
+                     AirState(35.0, psychro.humidity_ratio(35.0, 0.40), 0.2))
+    if fan_position == "blow-through":
+        assert u.T_rating_in_C > mix.T_C                   # fan heat before the coil
+    else:
+        assert u.T_rating_in_C == pytest.approx(mix.T_C, abs=1e-9)
+    assert u.W_rating_in == pytest.approx(mix.W, rel=1e-12)
+    # exact datasheet capacity and SHR at the derived coil-inlet state
+    r = u.coil(u.T_rating_in_C, u.W_rating_in, u.m_supply_kg_s, 35.0, 1.0)
+    assert r.Q_total_W == pytest.approx(u.Q_rated_W, rel=1e-9)
+    assert r.shr == pytest.approx(u.shr_rated, rel=1e-9)
+    # ... and NOT at the return-air state (which a coil-inlet reading would assume)
+    r_ret = u.coil(26.7, W_ret, u.m_supply_kg_s, 35.0, 1.0)
+    assert abs(r_ret.Q_total_W / u.Q_rated_W - 1) > 0.01
+
+
+def test_return_air_reference_needs_fraction_and_outdoor_rh():
+    data = _card_dict(rating_reference={"value": "return_air_with_fresh_air", "unit": "-",
+                                        "source": "x", "status": "assumption"})
+    del data["rating_outdoor_rh"]
+    card = UnitCard.model_validate(data)
+    items = dict(card.open_items())
+    assert "rating_fresh_air_fraction" in items and "rating_outdoor_rh" in items
+    with pytest.raises(MissingEvidenceError) as exc:
+        DXUnit.from_card(card)
+    assert set(exc.value.ids) >= {"rating_fresh_air_fraction", "rating_outdoor_rh"}
+
+
+def test_unknown_rating_reference_is_rejected():
+    with pytest.raises(ValueError, match="rating_reference"):
+        UnitCard.model_validate(_card_dict(rating_reference={
+            "value": "supply_air", "unit": "-", "source": "x", "status": "assumption"}))
+
+
+def test_card_cannot_carry_plot_only_status():
+    with pytest.raises(ValueError):
+        UnitCard.model_validate(_card_dict(rating_indoor_wet_bulb={
+            "value": 19.4, "unit": "degC", "source": "x", "status": "plot-only assumption"}))

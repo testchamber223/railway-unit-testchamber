@@ -99,15 +99,20 @@ exactly the piece-3 model (W and RH are NaN).
 | `envelope` | Q = k·Ae·(T_out − T_in) | k: E-002; Ae definition: E-008 |
 | `solar_glazing` | Q = I·A_glass·g | I: E-013…E-020 (× E-021 on vertical glazing); g: E-031 |
 | `solar_opaque_sol_air` | T_sa = T_out + α·I/h_o; Q = k·A·(T_sa − T_in) | α: E-030; h_o: E-029 |
-| `passengers` | Q_s = n·q_s; m_w = n·q_l / h_g0 | q_s, q_l: E-026/E-027 (split of E-025); h_g0: E-006 |
-| `fresh_air` | m_da = V̇/v_out; Q_s = m_da·(h(T_out,W_in) − h(T_in,W_in)); Q_l = m_da·(h(T_out,W_out) − h(T_out,W_in)); m_w = m_da·(W_out − W_in) | V̇: E-028 per seat; psychrometrics: core.psychro |
+| `passengers` | Q_s = n·q_s; m_w = n·q_l / h_g(T_in), h_g(T) = h_g0 + c_p,w·T | q_s, q_l: E-026/E-027 (split of E-025); h_g0, c_p,w: E-006, E-007 |
+| `fresh_air` / `supply_air` | m_da = V̇/v_out; Q_s = m_da·(h(T_out,W_out) − h(T_in,W_out)); m_w = m_da·(W_out − W_in); Q_l = m_w·h_g(T_in) | V̇: E-028 per seat; psychrometrics: core.psychro |
 
 Modelling choices to review: (1) `solar_opaque_sol_air` includes plain
 conduction through A_opaque, so when A_opaque is already in Ae only the solar
 increment (sol-air minus `envelope`) is added; (2) the opaque k is taken as the
 coach-average k; (3) the fresh-air volume is taken at outside-air conditions;
-(4) passenger latent heat is converted to water with h_g0 = 2501 kJ/kg (E-006),
-consistent with the ASHRAE enthalpy formula; (5) no condensation yet, so RH may
+(4) passenger latent heat is converted to water with the cabin vapour enthalpy
+h_g(T_in) = h_g0 + c_p,w·T_in (E-006, E-007), so the latent gain is conserved
+exactly in the total-enthalpy balance (piece 6 follow-up; earlier h_g0 alone);
+(4b) an air stream's sensible heat is evaluated at the stream's own humidity and
+its latent heat as water added at h_g(T_in), so Q_s + Q_l = ṁ·(h_stream − h_cabin)
+exactly (piece 6 follow-up; earlier the cabin humidity was the reference);
+(5) no condensation yet, so RH may
 exceed 1 in scenarios without dehumidification.
 
 **Reference coach** (`data/reference_coach.yaml`). Every numeric field is an
@@ -198,11 +203,18 @@ input until the controller (piece 7).
   compressor power (E-049 empty), no condensate re-evaporation.
 - The card's "indoor" rating condition is taken as the coil inlet state.
 - Fan motor heat is assumed to be entirely in the air stream.
-- The split between sensible and latent heat depends on the humidity used as
-  reference: the coil's sensible capacity and the zone's sensible loads differ
-  by a term ṁ_f·c_p,w·ΔW·ΔT (0.4 % in the no-passenger test case).
-- Passenger latent heat is converted with h_g0 (E-006), so the vapour's
-  sensible part (≈ ṁ_w·1.86·T) is not in the coil's total-load bookkeeping.
+- Sensible checks are only meaningful on ONE humidity reference. Coil and
+  cabin sensible heat are both evaluated at the supply humidity W_s; the fresh
+  air's sensible share is then the mixing-box rise ṁ_s·(h(T_mix, W_s) − h(T_cabin, W_s)).
+  The primary check is the TOTAL enthalpy balance, which needs no split.
+- Rating reference (card field `rating_reference`): `coil_inlet` uses the
+  card's indoor condition as coil inlet; `return_air_with_fresh_air` mixes it
+  with outdoor air at `rating_fresh_air_fraction` (taken as a dry-air mass
+  fraction; plus fan heat if blow-through) and normalises the curve there.
+  The rated capacity is taken as the coil's gross capacity in both cases.
+- Plot-only values: E-051 (DHF14 coil-inlet wet-bulb 19.4 °C) has status
+  `plot-only assumption`; the registry refuses it unless
+  `allow_plot_only=True`, so no procedure, model or report can use it.
 
 **Verification** (`tests/test_unit.py`, `tests/test_coach_unit.py`;
 verification-only unit `tests/data/verification_unit.yaml`; illustrated in
@@ -218,20 +230,169 @@ verification-only unit `tests/data/verification_unit.yaml`; illustrated in
 | Dry coil when inlet dew point < ADP | no condensate, SHR = 1 | pass |
 | Extrapolation flag with test limits | raised outside, not inside | pass |
 | Mixing equal flows | mean W and h | 1e-12 |
-| Pull-down: zone energy balance | 0.1 % | 6e-5 % |
-| Pull-down: zone moisture balance | 0.1 % | 8e-3 % |
+| **Pull-down: whole-system TOTAL enthalpy** (inflow = C·dT + M_da·h_g(T)·dW) — primary | 0.1 % | 1e-4 % |
+| Pull-down: zone energy balance (sensible store) | 0.1 % | pass |
+| Pull-down: zone moisture balance | 0.1 % | pass |
+| Steady state: coil total = envelope + passengers (s+l) + fresh-air Δh + fan | 0.1 % | 5e-4 % |
 | Unit identity ṁ_s(h_s − h_z) = ṁ_f(h_o − h_z) − Q_coil + P_fan | every step | 1e-9 |
-| Steady state: coil sensible = sensible loads + fan | 0.5 % | 0.014 % |
+| Steady state: coil sensible = envelope + passenger sensible + mixing-box sensible + fan, all at W_s | 0.5 % | 6e-4 % |
 | No double counting (no passengers/sun): coil total = envelope + fresh-air Δh + fan | 0.5 % | 1e-3 % |
 | Heating mode: supply gain = fresh-air Δh + heater + fan; energy balance | 1e-9 / 0.1 % | pass |
 
+## Virtual facilities and test procedures: how to write a procedure file
+
+**Facilities** (`core/chamber.py`).
+
+- *UnitTestRoom* — indoor and outdoor psychrometric rooms held at set dry-bulb
+  and humidity (ideal control; tolerances E-052…E-055 checked on the
+  *measured* room conditions; room capacities E-056/E-057). Capacity by the
+  air-enthalpy method (ASHRAE 37 / EN 14511-3, clause to confirm): measurement
+  planes at the unit air inlet (after the mixing box) and supply outlet,
+  Q_net = ṁ·(h_in − h_out), Q_gross = Q_net + P_fan. Steady-state model.
+- *VehicleChamber* — inside dimensions E-061 (CETEMET 28 × 5 × 5.5 m,
+  literature, to confirm), air temperature ramped to the setpoint at most at
+  E-066 and then held; measured chamber temperature = mean of E-067 = 8 probes
+  (UIC 553-1 App. H); solar lamps on the roof and sides with the App. B
+  vertical factor (E-021). The chamber air is **one well-mixed volume**
+  (non-uniformity comes later from CFD). A quasi-steady plant check compares
+  the required heating/cooling with E-064/E-065.
+- *Virtual sensors* (`core/sensors.py`) — one fixed error per probe, drawn
+  within ± accuracy (E-058 temperature, E-059 RH, E-060 airflow); the
+  uncertainty of every derived quantity is the worst-case sum over channels,
+  so the true value lies within measured ± U.
+
+**Procedure file** (`procedures/<name>.yaml`, run by
+`core.procedures.run_procedure`):
+
+```yaml
+name: Steady comfort, zone II
+standard: EN 13129:2016 / UIC 553-1
+clause: to confirm
+facility: vehicle_chamber            # or unit_room
+parameters:                          # user-defined values, declared once
+  max_settle: {user_defined: 48, unit: h, note: practical limit}
+initial_state: soaked                # cabin starts at the first chamber conditions
+stability: {signal: cabin_T, window: E-072, max_drift: E-073}
+steps:
+  - set_conditions:                  # only the given fields change
+      chamber_T: E-023
+      chamber_RH: E-071
+      solar: {intensity: E-016, vertical_factor: E-021, absorptance: E-030,
+              g_value: E-031, h_o: E-029, surfaces: [roof, left_side]}
+      passengers: {count: E-039, sensible_W: E-026, latent_W: E-027}
+      unit: {mode: cooling, part_load: full}
+  - hold_until_stable: {max_duration: param:max_settle}
+  - measure: {duration: E-074}       # window: after (default) | trailing
+measured_quantities: [cabin_T_mean, cabin_RH_mean, chamber_T_mean]
+acceptance:
+  - name: cabin mean temperature within the comfort band
+    quantity: cabin_T_mean
+    within_band: E-024               # value ± tolerance of the evidence row
+```
+
+*Values.* Every number is a reference: `E-xxx` (evidence; unit checked),
+`card:<field>` (unit card, SI), `param:<name>` (declared user-defined
+parameter) or an inline `{user_defined: x, unit: u, tolerance: t}`. A bare
+number, an unknown key, an unknown or empty evidence ID, a plot-only value or a
+unit mismatch is rejected before anything runs, with one message listing every
+problem and where it occurs.
+
+*Steps.* `set_conditions` (vehicle: chamber_T, chamber_RH, solar, passengers,
+heater_W, unit; unit room: indoor/outdoor {T, RH or wet_bulb}, fresh_fraction
+[`none` | `from_rating_reference` | ref], unit), `hold_until_stable`
+(max_duration; uses `stability`), `hold` (duration, optional
+`require_stable_end`), `ramp` (chamber_T, rate), `run_until` (target ±
+tolerance, max_duration; gives `time_to_setpoint_h`), `measure`.
+
+*Quantities.* vehicle: `cabin_T_mean`, `cabin_RH_mean`, `chamber_T_mean`,
+`dT_cabin_chamber_mean`, `k_value`, `time_to_setpoint_h`; unit room:
+`capacity_gross_W`, `capacity_net_W`, `sensible_capacity_gross_W`.
+
+*Criteria.* `within_band` (evidence row with tolerance, or user value with
+tolerance), `within` {target, tolerance}, `within_relative` {target,
+tolerance}, `at_most`, `at_least`. Each result reports pass/fail and whether
+the decision is *conclusive* given the measurement uncertainty.
+
+*TestResult.* Measured values ± uncertainty (and the ideal-sensor model value),
+criteria, validity issues (facility capacity, control tolerance, not stable,
+setpoint not reached), every evidence ID and unit-card field used (with where it
+was used), all assumptions and labelled overrides, all user-defined values,
+and the simulated segments. `summary()` prints the report text.
+
+*Running with incomplete evidence.* Facility, sensor and criteria rows are
+empty assumptions until sourced, so the runner refuses to run. For
+verification only, `Registry().with_overrides(values, label="verification-only")`
+fills them with labelled stand-ins (`tests/data/verification_overrides.yaml`);
+every TestResult lists them as overrides.
+
+**Procedures provided**
+
+| File | Facility | What | Pass if |
+|---|---|---|---|
+| `k_value_uic553_1.yaml` | vehicle chamber | port of `k_value_test`: heater method at E-010, steady window E-011/E-032, k over E-033 | ΔT in E-009, chamber T in E-010 |
+| `unit_capacity_rating.yaml` | unit room | capacity at the card's rating condition (rating_reference respected) | gross capacity within E-075 of rated |
+| `pulldown_cooling.yaml` | vehicle chamber | soak at E-022 with sun, then full load until E-068 ± E-069 | time ≤ E-070 |
+| `comfort_steady_zone1.yaml` / `_zone2.yaml` | vehicle chamber | E-022 / E-023 with solar E-013 / E-016, full passengers, full load | cabin mean in E-024 |
+| `user_custom_example.yaml` | vehicle chamber | client-defined conditions, all user-defined | client band |
+
+**Verification** (`tests/test_chamber.py`, `tests/test_procedures.py`;
+illustrated in `docs/piece6_procedures.ipynb`):
+
+| Check | Criterion | Result |
+|---|---|---|
+| Unit room, ideal sensors: measured gross capacity = model coil Q_total (3 inlet states) | 0.1 % | pass (1e-6 at rating) |
+| Unit room with sensor accuracy: true value within measured ± U (10 seeds) | always | pass |
+| Room / chamber capacity and tolerance limits flagged | — | pass |
+| Chamber: 8-probe mean used; held within E-062 once stable | — | pass |
+| Ported k-test vs. `k_value_test` | 1e-9 | identical |
+| Runner rejects unknown key, unknown step, missing ID, empty assumption in a criterion, bare number, plot-only value, unit mismatch, undeclared parameter | clear message | pass |
+| TestResult lists every evidence ID used; flags assumptions, overrides and user values | — | pass |
+| Custom procedure runs with user values (and parameter overrides) | — | pass |
+| Pull-down: whole-system total enthalpy over soak + pull-down | 0.1 % | pass |
+
+With the verification stand-ins, the zone II comfort test passes (cabin
+24.1 °C); zone I fails (32.8 °C) and the pull-down levels off at 28.04 °C,
+just above its 27 ± 1 °C band — consequences of the stand-in inputs and the
+verification unit, not statements about any real coach.
+
+## Known limitations
+
+1. **No latent degradation**: moisture held on the wet coil is not
+   re-evaporated into the supply air during compressor off-cycles.
+2. **No part-load degradation curve** (PLF): cycling losses are ignored.
+3. **No airflow capacity curve**: capacity does not change with airflow other
+   than through the bypass factor.
+4. Generic EnergyPlus capacity curve (E-042…E-047) until real unit data; curve
+   validity limits unknown (E-048), so the extrapolation flag is `None`.
+5. No compressor power (EIR curve E-049 empty): no COP, and outdoor-room /
+   chamber plant loads exclude compressor heat.
+6. No controller yet (piece 7): part load is a constant input.
+7. Single-zone coach: perfectly mixed cabin air, one lumped heat capacity, no
+   wall thermal lag, no infiltration.
+8. No condensation in the cabin: RH can exceed 100 % without dehumidification.
+9. Chamber air is one well-mixed volume; no spatial non-uniformity of air
+   temperature, humidity or lamp irradiance (CFD later).
+10. Facilities use ideal control (rooms / chamber exactly at setpoint while
+    capacity suffices); the plant-capacity check is quasi-steady and ignores
+    humidity control.
+11. Solar geometry uses the interior dimensions as a proxy for roof and side
+    areas; opaque surfaces use the coach-average k; lamp spectrum and
+    incidence are ignored.
+12. Fan motor heat is entirely in the air stream; fan power from the card has
+    no measurement uncertainty.
+13. The rated capacity is taken as the coil's gross capacity at the
+    (derived) coil-inlet rating state, for both rating references.
+14. Virtual sensors have fixed (calibration) errors only — no noise, drift or
+    response time; the cabin is measured by one sensor.
+
 ## Open evidence items
 
-Every evidence row still marked `assumption`, "to confirm" or "confirm against
-the PDF", grouped by who could supply it. `tests/test_registry.py` fails if an
-open item is missing from this table. The EOG grouping is a first guess at
-that party's scope — reassign rows as needed. Unit-card fields (e.g. the
-DHF14's missing rating condition) are reported by `UnitCard.report()`.
+Every evidence row still marked `assumption`, `plot-only assumption`, "to
+confirm" or "confirm against the PDF", grouped by who could supply it.
+`tests/test_registry.py` fails if an open item is missing from this table. The
+EOG grouping is a first guess at that party's scope — reassign rows as needed.
+Unit-card fields (e.g. the DHF14's missing rating condition and rating
+reference) are reported by `UnitCard.report()`.
 
 **Team (coach thermal data doc)**
 
@@ -262,8 +423,29 @@ DHF14's missing rating condition) are reported by `UnitCard.report()`.
 | E-048 | DX cooling capacity curve validity limits (x: inlet wet-bulb; y: outdoor dry-bulb) | *empty* | assumption | - | value missing; until filled the extrapolation flag is None |
 | E-049 | DX EIR (power) curve coefficients | *empty* | assumption | - | value missing; needed only for compressor power |
 | E-050 | Rated sensible heat ratio fallback (unit datasheet gives no SHR) | *empty* | assumption | - | value missing; coil refuses to run for cards without SHR |
+| E-051 | DHF14 coil-inlet wet-bulb at rating (ILLUSTRATION ONLY) | 19.4 degC | plot-only assumption | AHRI-style value chosen for illustration; not on the DHF14 datasheet | PLOT-ONLY: illustration value, refused by registry for any calculation |
 
-**Standard documents (UIC 553, UIC 553-1, EN 13129, ASHRAE)**
+**Test facility operator (CETEMET / unit test lab, sensor certificates)**
+
+| ID | Item | Value | Status | Source / clause | What is open |
+|---|---|---|---|---|---|
+| E-052 | Unit test room: indoor room dry-bulb control tolerance | *empty* | assumption | - | value missing; to confirm |
+| E-053 | Unit test room: indoor room relative humidity control tolerance | *empty* | assumption | - | value missing; to confirm |
+| E-054 | Unit test room: outdoor room dry-bulb control tolerance | *empty* | assumption | - | value missing; to confirm |
+| E-055 | Unit test room: outdoor room relative humidity control tolerance | *empty* | assumption | - | value missing; to confirm |
+| E-056 | Unit test room: indoor room conditioning capacity limit | *empty* | assumption | - | value missing |
+| E-057 | Unit test room: outdoor room conditioning capacity limit | *empty* | assumption | - | value missing |
+| E-058 | Virtual temperature sensor accuracy (+/-) | *empty* | assumption | - | value missing |
+| E-059 | Virtual relative humidity sensor accuracy (+/-) | *empty* | assumption | - | value missing |
+| E-060 | Virtual airflow measurement accuracy (+/- relative) | *empty* | assumption | - | value missing |
+| E-061 | CETEMET full-coach climatic chamber inside dimensions (L x W x H) | 28 x 5 x 5.5 | literature | ENAC accreditation news page (CETEMET full-coach chamber) | confirm against CETEMET / ENAC data |
+| E-062 | Vehicle chamber air temperature control tolerance | *empty* | assumption | - | value missing |
+| E-063 | Vehicle chamber relative humidity control tolerance | *empty* | assumption | - | value missing |
+| E-064 | Vehicle chamber heating capacity | *empty* | assumption | - | value missing |
+| E-065 | Vehicle chamber cooling capacity | *empty* | assumption | - | value missing |
+| E-066 | Vehicle chamber air temperature ramp-rate limit | *empty* | assumption | - | value missing |
+
+**Standard documents (UIC 553, UIC 553-1, EN 13129, EN 14750, ASHRAE 37)**
 
 | ID | Item | Value | Status | Source / clause | What is open |
 |---|---|---|---|---|---|
@@ -295,3 +477,13 @@ DHF14's missing rating condition) are reported by `UnitCard.report()`.
 | E-029 | Outside surface heat transfer coefficient | *empty* | assumption | ASHRAE Fundamentals Ch.18 / glazing datasheet, to find | value missing; check against the PDF |
 | E-032 | k-test stability criterion inside the steady-state window (max \|dT_in/dt\|) | 0.1 K/h | assumption | - | criterion inside the 3 h window not in notes; 0.1 K/h assumed |
 | E-033 | k-test averaging period (k from the mean of the last hour) | 1 h | standard | UIC 553-1, 2nd ed. 2005 / 7.2.3 | check against the PDF |
+| E-067 | Number of chamber air temperature probes | 8 | standard | UIC 553-1, 2nd ed. 2005 / App. H | check against the PDF |
+| E-068 | Pull-down test cabin temperature setpoint | *empty* | assumption | - | value missing; to confirm |
+| E-069 | Pull-down test setpoint tolerance | *empty* | assumption | - | value missing; to confirm |
+| E-070 | Pull-down test maximum time to reach setpoint | *empty* | assumption | - | value missing; to confirm |
+| E-071 | Chamber relative humidity for cooling tests (pull-down / comfort) | *empty* | assumption | - | value missing; to confirm |
+| E-072 | Comfort / soak stability window | *empty* | assumption | - | value missing; to confirm |
+| E-073 | Comfort / soak stability criterion (max cabin drift) | *empty* | assumption | - | value missing; to confirm |
+| E-074 | Comfort test measurement duration | *empty* | assumption | - | value missing; to confirm |
+| E-075 | Unit capacity test acceptance tolerance (measured vs rated) | *empty* | assumption | - | value missing; to confirm |
+| E-076 | Unit capacity test measurement duration | *empty* | assumption | - | value missing; to confirm |

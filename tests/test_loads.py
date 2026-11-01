@@ -56,6 +56,16 @@ def test_passengers_hand_calc():
     assert m_w == pytest.approx(4000.0 / 2_501_000.0, rel=REL)
 
 
+def test_passengers_with_cabin_temperature_hand_calc():
+    # With T_in = 25 degC the vapour enthalpy is h_g = 2501 + 1.86 * 25 = 2547.5 kJ/kg
+    # (E-006, E-007): m_w = 80 * 50 / 2 547 500 = 1.57017...e-3 kg/s, so that
+    # m_w * h_g = 4000 W exactly (latent gain conserved).
+    Q_sens, m_w = loads.passengers(80, 70.0, 50.0, T_in=25.0)
+    assert Q_sens == pytest.approx(5600.0, rel=REL)
+    assert m_w == pytest.approx(4000.0 / 2_547_500.0, rel=REL)
+    assert m_w * loads.vapour_enthalpy(25.0) == pytest.approx(4000.0, rel=REL)
+
+
 def test_fresh_air_hand_calc():
     # Inputs: 1200 m3/h of outside air at 35 degC / 40 % RH; interior 27 degC,
     # W_in = 0.010 kg/kg; p = 101325 Pa.
@@ -70,9 +80,12 @@ def test_fresh_air_hand_calc():
     def h(T, W):  # J/kg dry air; 1.006, 2501, 1.86 kJ/kg(K) = E-005, E-006, E-007
         return 1006.0 * T + W * (2_501_000.0 + 1860.0 * T)
 
-    Q_sens = m_da * (h(T_out, W_in) - h(T_in, W_in))
-    Q_lat = m_da * (h(T_out, W_out) - h(T_out, W_in))
+    # Sensible at the stream's own humidity W_out; latent = water added at the
+    # cabin vapour enthalpy h_g(T_in) = 2501e3 + 1860 T_in J/kg.
+    Q_sens = m_da * (h(T_out, W_out) - h(T_in, W_out))
     m_w = m_da * (W_out - W_in)
+    Q_lat = m_w * (2_501_000.0 + 1860.0 * T_in)
+    assert Q_sens + Q_lat == pytest.approx(m_da * (h(T_out, W_out) - h(T_in, W_in)), rel=REL)
 
     got = loads.fresh_air(V, T_out, RH_out, T_in, W_in, p)
     assert got[0] == pytest.approx(Q_sens, rel=REL)
