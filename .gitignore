@@ -21,3 +21,10 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ANSYS Fluent / Workbench (cases, data and meshes are very large)
+*.cas.h5
+*.dat.h5
+*.msh*
+*.wbpj
+*_files/
