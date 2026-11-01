@@ -1,0 +1,57 @@
+# Case 0 -- de Vahl Davis (1983) differentially heated square cavity, air.
+# Purpose: verify the Fluent set-up (natural convection, Boussinesq) against a
+# classic benchmark before any coach model is trusted.
+# STATUS: planned. No CFD results exist yet; benchmark values E-117..E-120 are
+# still to be transcribed from the paper.
+case_id: case0_devahldavis
+description: 2D square cavity, hot left wall, cold right wall, adiabatic top and bottom.
+purpose: Verification of natural-convection modelling (average Nu vs de Vahl Davis 1983).
+fluent_version: to be recorded when run
+status: planned
+
+geometry:
+  side_length: {value: "param:L", unit: m, note: from ansys/case0_inputs.py (Ra exact)}
+
+parameters:
+  T_hot:  {user_defined: 25.0, unit: degC, note: "T_mean + dT/2 (case0_inputs: T_mean 20 degC, dT 10 K)"}
+  T_cold: {user_defined: 15.0, unit: degC, note: "T_mean - dT/2"}
+
+runs:
+  - name: Ra1e3
+    parameters: {L: {user_defined: 0.009870877895075436, unit: m, note: computed by ansys/case0_inputs.py}}
+  - name: Ra1e4
+    parameters: {L: {user_defined: 0.021266161758219417, unit: m, note: computed by ansys/case0_inputs.py}}
+  - name: Ra1e5
+    parameters: {L: {user_defined: 0.045816556615737344, unit: m, note: computed by ansys/case0_inputs.py}}
+  - name: Ra1e6
+    parameters: {L: {user_defined: 0.09870877895075433, unit: m, note: computed by ansys/case0_inputs.py}}
+
+solver:
+  models: [laminar, energy, "Boussinesq density", "steady pressure-based"]
+  schemes: {pressure: PRESTO!, momentum: second order upwind, energy: second order upwind,
+            pressure-velocity coupling: SIMPLE}
+  convergence: {continuity: 1.0e-6, x-velocity: 1.0e-6, y-velocity: 1.0e-6, energy: 1.0e-9}
+
+boundary_conditions:
+  - {name: hot_wall, type: wall_temperature, value: "param:T_hot", unit: degC}
+  - {name: cold_wall, type: wall_temperature, value: "param:T_cold", unit: degC}
+  - {name: top_wall, type: adiabatic}
+  - {name: bottom_wall, type: adiabatic}
+  - {name: gravity, type: operating_condition, value: E-122, unit: m/s2}
+
+materials:   # constant properties at T_mean = 20 degC, CoolProp "Air" (ansys/case0_inputs.py)
+  - {name: density, value: {user_defined: 1.2045751824931505, unit: kg/m3, note: CoolProp}, unit: kg/m3}
+  - {name: specific_heat, value: {user_defined: 1006.1440320870352, unit: J/(kg.K), note: CoolProp}, unit: J/(kg.K)}
+  - {name: thermal_conductivity, value: {user_defined: 0.025873828302933142, unit: W/(m.K), note: CoolProp}, unit: W/(m.K)}
+  - {name: viscosity, value: {user_defined: 1.8205675178515367e-05, unit: Pa.s, note: CoolProp}, unit: Pa.s}
+  - {name: thermal_expansion, value: {user_defined: 0.0034209875148764166, unit: 1/K, note: CoolProp}, unit: 1/K}
+
+meshes:      # uniform square meshes; h normalised by L
+  - {name: coarse, cell_count: 1600, h: 0.025, h_unit: "-", note: 40 x 40}
+  - {name: medium, cell_count: 6400, h: 0.0125, h_unit: "-", note: 80 x 80}
+  - {name: fine, cell_count: 25600, h: 0.00625, h_unit: "-", note: 160 x 160}
+
+results: results/{run}_{mesh}.csv
+results_format: >-
+  Fluent XY export of the hot wall: columns position_m (along the wall) and
+  wall_heat_flux_W_m2 (positive into the fluid); or a single column Nu_avg.

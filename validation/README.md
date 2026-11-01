@@ -6,6 +6,8 @@ used to check the `core` models. Each CSV is run automatically by `pytest`.
 | File                | Checks          | Run by                  |
 |---------------------|-----------------|-------------------------|
 | `psychro_cases.csv` | `core.psychro`  | `tests/test_psychro.py` |
+| `gci.py` | mesh convergence (Celik et al. 2008) | `tests/test_gci.py` |
+| `case0_compare.py` | Fluent Case 0 vs de Vahl Davis 1983 | `python -m validation.case0_compare`, `tests/test_cfd.py` |
 
 Columns: `case_id, quantity, inputs, expected, unit, tolerance_pct, source, page, status`
 

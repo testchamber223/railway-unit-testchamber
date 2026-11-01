@@ -677,6 +677,7 @@ class TestResult:
     notes: list[str]
     segments: list[Segment] = field(default_factory=list)
     sensors: str = "ideal"
+    warnings: list[str] = field(default_factory=list)   # e.g. ROM validity range
 
     @property
     def passed(self) -> bool:
@@ -709,6 +710,9 @@ class TestResult:
         if self.validity:
             lines.append("Validity issues:")
             lines += [f"  - {v}" for v in self.validity]
+        if self.warnings:
+            lines.append("Warnings:")
+            lines += [f"  - {w}" for w in self.warnings]
         lines.append(f"Evidence used ({len(self.evidence_used)}): "
                      + ", ".join(self.evidence_ids))
         lines.append(f"Assumptions / overrides ({len(self.assumptions)}):")
@@ -774,6 +778,7 @@ def run_procedure(
     seed: int | None = 0,
     parameters: dict[str, float] | None = None,
     dt_out_s: float = 60.0,
+    rom_validity=None,
 ) -> TestResult:
     """Validate and run a procedure; return a TestResult.
 
@@ -784,6 +789,9 @@ def run_procedure(
         evidence: registry to resolve IDs (e.g. with labelled overrides).
         sensors: "ideal" or "evidence" (accuracies E-058..E-060, seeded errors).
         parameters: values for user-defined parameters (override file defaults).
+        rom_validity: a core.rom.ValidityRange; conditions outside it (outside
+            temperature, solar intensity, occupancy, unit supply airflow) are
+            listed in TestResult.warnings.
 
     Raises:
         ProcedureError: every problem found before running (unknown keys,
@@ -856,9 +864,36 @@ def run_procedure(
     result.sensors = "ideal" if sensor_set.is_ideal else f"evidence accuracies, seed {seed}"
     if mixing_note:
         result.notes.insert(0, mixing_note)
+    if rom_validity is not None and pf.facility == "vehicle_chamber":
+        for values in _rom_factor_values(proc, r, unit_card):
+            for w in rom_validity.check(values):
+                if w not in result.warnings:
+                    result.warnings.append(w)
     if r.problems:             # problems found while evaluating (should not happen)
         raise ProcedureError(pf.name, r.problems)
     return result
+
+
+def _rom_factor_values(proc: Procedure, r: _Resolver, card: UnitCard | None) -> list[dict]:
+    """Inputs of each set_conditions step in the names used by core.rom."""
+    airflow = None
+    if card is not None and card.si("supply_airflow") is not None:
+        airflow = card.si("supply_airflow") * SECONDS_PER_HOUR          # m3/h
+    out, state = [], {}
+    for i, (kind, s) in enumerate(proc.steps):
+        if kind != "set_conditions":
+            continue
+        c = _chamber_conditions(s, r, f"steps[{i}].set_conditions")
+        if "T_set" in c:
+            state["outside_T_C"] = c["T_set"]
+        if "solar" in c:
+            state["solar_W_m2"] = c["solar"]["I"] if c["solar"] else 0.0
+        if "passengers" in c:
+            state["occupancy"] = c["passengers"]["n"] if c["passengers"] else 0.0
+        if c.get("unit") and c["unit"][0] != "off":
+            state["supply_airflow_m3_h"] = airflow
+        out.append(dict(state))
+    return out
 
 
 def _check_one_standard(pf: ProcedureFile, r: _Resolver) -> str | None:

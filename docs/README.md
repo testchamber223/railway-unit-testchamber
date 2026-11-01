@@ -456,6 +456,110 @@ limitations 16); the inverter makes one and holds 25.98 °C. The small
 capacity dither at the start of the inverter run is the 0.01 K sensor
 resolution acting through the proportional gain.
 
+## CFD and reduced-order model: cases, mesh convergence, calibration, validity range
+
+> **No CFD results are included yet.** All three cases are `planned`. Every
+> number shown as "CFD" in tests and in `docs/piece8_cfd_rom.ipynb` is
+> manufactured, verification-only data.
+
+**Case files** (`ansys/cases/<case_id>/case.yaml`, schema and loader in
+`core/cfd_import.py`). A case records what Fluent runs: description, purpose,
+Fluent version, status (`planned | running | done`), geometry, parameters,
+runs, solver settings (models, schemes, convergence criteria), boundary
+conditions and materials, meshes (name, cell count, representative size *h*)
+and the results path pattern (`results/{run}_{mesh}.csv`). Every geometry,
+boundary-condition and material value is a reference (`E-xxx`, `card:<field>`,
+`param:<name>` or `{user_defined: …}`), resolved with unit checks. Unknown
+keys, unknown or plot-only evidence, unit mismatches, undeclared parameters and
+bare numbers are refused. Empty evidence is listed as an **open item** while a
+case is planned and refused once it is running or done. A done case must list
+meshes and have a results CSV for every run and mesh. Only `case.yaml`,
+scripts and result CSVs go into git (`.gitignore` excludes `*.cas.h5`,
+`*.dat.h5`, `*.msh*` — which covers `*.msh` and `*.msh.h5` — `*.wbpj` and
+`*_files/`).
+
+| Case | Purpose | Meshes (planned) | Open items now |
+|---|---|---|---|
+| `case0_devahldavis` | de Vahl Davis square cavity, Ra = 1e3…1e6 (4 runs): verify natural-convection set-up | 40², 80², 160² (h/L) | none (inputs complete) |
+| `case1_chamber_section` | chamber section with a coach section: chamber air non-uniformity | 120k / 250k / 500k cells | E-094, E-095 |
+| `case2_coach_bay` | one coach bay: zone temperatures for calibration | 150k / 300k / 500k cells | E-026, E-035, E-036, E-077 |
+
+**Case 0 inputs** (`ansys/case0_inputs.py`). For each Ra the cavity side is
+L = (Ra ν α / (g β ΔT))^(1/3), so Ra is matched exactly. Air properties come
+from CoolProp's "Air" pseudo-pure fluid at the mean temperature (Lemmon et al.
+2000 EOS; Lemmon & Jacobsen 2004 transport; Bell et al. 2014), g = E-122, and
+β·ΔT must stay below E-123 (0.1). At 20 °C with ΔT = 10 K: L = 9.87 / 21.3 /
+45.8 / 98.7 mm, β·ΔT = 0.034. Real-air Pr = 0.708 is 0.29 % below the
+benchmark Pr = 0.71 (E-125), and this deviation is printed. The values are
+copied into `case0_devahldavis/case.yaml`, and a test keeps the two equal.
+
+**Mesh convergence** (`validation/gci.py`). This is the three-grid GCI of
+Celik et al. 2008 (E-116; page to confirm). The apparent order *p* comes from
+fixed-point iteration (it handles non-constant refinement ratios), followed by
+the Richardson-extrapolated value, e_a, e_ext and GCI_fine = 1.25·e_a/(r^p − 1).
+Oscillatory convergence (ε32/ε21 < 0) is flagged. Representative size:
+h = (V/N)^(1/3) (3D) or (A/N)^(1/2) (2D).
+
+**Case 0 comparison** (`validation/case0_compare.py`). For each run it reads
+the Fluent hot-wall CSV and computes Nu = ∫q dy / (k ΔT) (or takes `Nu_avg`),
+applies the GCI to the three finest meshes, and compares the extrapolated Nu
+with E-117…E-120. It passes within E-121. E-117…E-120 are literature rows with
+EMPTY values, to be transcribed from the paper. Until results, benchmarks or
+the tolerance exist, each run is **skipped** with a message saying what is
+missing.
+
+**Multi-zone coach** (`core/coach.py`, `MultiZoneCoach`, `simulate_multizone`).
+There are N zones along the coach (default front / middle / back). Each zone
+has shares of heat capacity, envelope, passengers, solar gain and air volume,
+and its own temperature and humidity.
+- *Mixing:* neighbouring zones exchange G_mix as an equal mass flow
+  m_x = G_mix/c_p in both directions.
+- *Supply and return:* supply air reaches zone i with fraction f_i, and return
+  air is drawn with weights r_i. Where f ≠ r, the net flow is carried along
+  the coach (upwind state).
+- *Conservation:* every incoming stream uses the `supply_air` convention, so
+  sensible heat, moisture and total enthalpy are conserved exactly. A test
+  closes the total-enthalpy balance within 0.1 % with mixing and advection.
+- *Single-zone limit:* with G_mix = 10⁷ W/K the model reproduces the
+  single-zone pull-down within 0.01 K (0.0002 K achieved). Pieces 3–7 remain
+  the reference.
+- *Outputs:* per-zone T / W / RH, capacity-weighted mean, the mean at the
+  UIC 553-1 measuring points (E-124, empty, so NaN until set), spread
+  (max − min) and front-to-back difference.
+- *Steady state:* `steady_state` solves the same balances for the steady case,
+  and a test checks it against a 40 h dynamic run.
+
+**Reduced-order model calibration** (`core/rom.py`).
+- *DOE:* `lhs_design` (scipy `qmc.LatinHypercube`) over named factors
+  (supply airflow, outside temperature, solar, occupancy); `write_run_list`
+  writes the CSV for the Fluent team.
+- *Fit:* `calibrate` fits G_mix, the supply fractions (stick-breaking, so
+  they stay in [0, 1] and sum to 1) and the effective solar aperture A_sol by
+  least squares on steady zone temperatures. It reports RMS and max error per
+  zone and for the spread.
+- *Cross-validation:* `leave_one_out` refits without each run and predicts it.
+- *Validity range:* the bounding box of the DOE. `run_procedure(...,
+  rom_validity=...)` lists every condition outside it in `TestResult.warnings`.
+
+**Verification** (`tests/test_gci.py`, `tests/test_cfd.py`,
+`tests/test_multizone.py`, `tests/test_rom.py`; manufactured data only):
+
+| Check | Criterion | Result |
+|---|---|---|
+| GCI, f0 + C h² with r = 2 (and non-constant r) | p = 2 ± 1e-6, f0 recovered | pass |
+| GCI, f0 + C h¹ | p = 1 ± 1e-6 | pass |
+| GCI, oscillating sequence | flagged | pass |
+| Case files: planned load with open items; done without results / meshes, unknown key or ID, unit mismatch, bare number, plot-only, empty evidence once running | refused, clear message | pass |
+| Case 0 inputs: Ra recomputed; β·ΔT < E-123; yaml = script | 1e-12 | pass |
+| Case 0 comparison on manufactured results: GCI p = 2, extrapolated Nu exact; pass / fail against stand-in benchmark and tolerance; skips while missing | — | pass |
+| Multi-zone with large G_mix vs single zone (pull-down, DX unit, humidity; and dry) | 0.01 K | 0.0002 K |
+| Multi-zone total enthalpy with mixing and advection | 0.1 % | pass |
+| Multi-zone steady state vs long dynamic run | 1e-3 K | pass |
+| Calibration, noise-free manufactured data: θ recovered | 1e-6 | pass |
+| Calibration, 0.02 K noise: G_mix ±10 %, fractions ±0.01, A_sol ±2 %, RMS ≈ noise | — | G 311.7 (3.9 %), fractions ±0.002, A_sol 0.2 %, RMS ≤ 0.021 K |
+| Leave-one-out | max error < 0.15 K | 0.064 K |
+| Procedure outside the validity range gets a warning | — | pass |
+
 ## Known limitations
 
 1. **No latent degradation**: moisture held on the wet coil is not
@@ -500,6 +604,18 @@ resolution acting through the proportional gain.
     is too small (cabin between sp + db/2 and sp + 3·db/2 for two stages).
 17. Controller interlocks: minimum on/off times apply to starts and stops
     only, not to stage or capacity changes while running.
+18. **The 512K-cell licence limit prevents a fine full-length coach model.**
+    CFD covers a chamber section (case 1) and one coach bay (case 2) only.
+19. **The front-to-back spread depends on how the coach section is extended**
+    to the full coach (zone shares, G_mix, supply and return distribution).
+    The calibrated multi-zone parameters are only as good as that extension
+    and are valid only inside the DOE bounding box.
+20. No CFD results exist yet: every case is planned, the Case 0 benchmark
+    values (E-117…E-120) are still to be transcribed, and the multi-zone
+    parameters have only been calibrated on manufactured data.
+21. The multi-zone ROM is calibrated on steady, sensible-only zone
+    temperatures (uniform humidity); dynamic and latent behaviour between
+    zones is not calibrated.
 
 ## Open evidence items
 
@@ -526,6 +642,7 @@ and control type) are reported by `UnitCard.report()`.
 | E-093 | Reference coach exterior length (solar areas) | *empty* | assumption | - | value missing; to confirm |
 | E-094 | Reference coach exterior width (solar areas) | *empty* | assumption | - | value missing; to confirm |
 | E-095 | Reference coach exterior height (solar areas) | *empty* | assumption | - | value missing; to confirm |
+| E-121 | Case 0 acceptance tolerance on average Nusselt number (relative) | *empty* | assumption | - | tolerance to decide; Case 0 comparison skips until set |
 
 **EOG (supplier / product data)**
 
@@ -578,7 +695,7 @@ and control type) are reported by `UnitCard.report()`.
 | E-107 | Airflow measurement first-order time constant | *empty* | assumption | - | value missing |
 | E-108 | Airflow measurement sampling period | *empty* | assumption | - | value missing |
 
-**Standard documents (UIC 553, UIC 553-1, EN 13129, EN 14750, ASHRAE 37)**
+**Standard documents and literature (UIC 553, UIC 553-1, EN 13129, EN 14750, EN 14511, ASHRAE, CFD benchmarks)**
 
 | ID | Item | Value | Status | Source / clause | What is open |
 |---|---|---|---|---|---|
@@ -642,3 +759,11 @@ and control type) are reported by `UnitCard.report()`.
 | E-113 | Setpoint curve point 2: cabin setpoint | *empty* | assumption | EN 13129:2016 / to confirm | setpoint-curve point; believed 22 + 0.25 (T_out - 19); MUST be confirmed |
 | E-114 | Setpoint curve point 3: outside temperature | *empty* | assumption | EN 13129:2016 / to confirm | setpoint-curve point; believed 22 + 0.25 (T_out - 19); MUST be confirmed |
 | E-115 | Setpoint curve point 3: cabin setpoint | *empty* | assumption | EN 13129:2016 / to confirm | setpoint-curve point; believed 22 + 0.25 (T_out - 19); MUST be confirmed |
+| E-116 | GCI safety factor Fs (three-grid study) | 1.25 | literature | Celik et al. 2008, J. Fluids Eng. 130(7), 078001 (Procedure for estimation and reporting of uncertainty due to discretization in CFD applications) / page to confirm | clause to confirm |
+| E-117 | de Vahl Davis benchmark: average Nusselt number, Ra = 1e3 | *empty* | literature | de Vahl Davis 1983, Int. J. Numer. Methods Fluids 3, 249-264 / page to confirm | value empty: transcribe from de Vahl Davis 1983 (page to confirm) |
+| E-118 | de Vahl Davis benchmark: average Nusselt number, Ra = 1e4 | *empty* | literature | de Vahl Davis 1983, Int. J. Numer. Methods Fluids 3, 249-264 / page to confirm | value empty: transcribe from de Vahl Davis 1983 (page to confirm) |
+| E-119 | de Vahl Davis benchmark: average Nusselt number, Ra = 1e5 | *empty* | literature | de Vahl Davis 1983, Int. J. Numer. Methods Fluids 3, 249-264 / page to confirm | value empty: transcribe from de Vahl Davis 1983 (page to confirm) |
+| E-120 | de Vahl Davis benchmark: average Nusselt number, Ra = 1e6 | *empty* | literature | de Vahl Davis 1983, Int. J. Numer. Methods Fluids 3, 249-264 / page to confirm | value empty: transcribe from de Vahl Davis 1983 (page to confirm) |
+| E-123 | Boussinesq validity limit on beta * delta T | 0.1 | assumption | - | rule of thumb 0.1 from the brief; stricter criteria exist - confirm |
+| E-124 | UIC 553-1 interior measuring point positions along the coach | *empty* | assumption | UIC 553-1, 2nd ed. 2005 / 7.2.2 / App. C (to confirm) | positions to find in UIC 553-1; uic_mean is NaN until set |
+| E-125 | de Vahl Davis benchmark Prandtl number | 0.71 | literature | de Vahl Davis 1983, Int. J. Numer. Methods Fluids 3, 249-264 / page to confirm | clause to confirm |

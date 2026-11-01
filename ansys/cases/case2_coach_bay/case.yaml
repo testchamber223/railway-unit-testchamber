@@ -1,0 +1,53 @@
+# Case 2 -- one bay of the coach interior (between two seat rows / window
+# pillars), periodic or symmetric ends.
+# Purpose: zone temperatures and air distribution for the multi-zone model
+# calibration (core/rom.py). One bay is what fits under the 512K-cell limit;
+# the front-to-back spread then depends on how the bay is extended.
+# STATUS: planned. No CFD results exist yet.
+case_id: case2_coach_bay
+description: Coach interior bay with supply diffusers, return grille, seats and passengers.
+purpose: >-
+  Steady zone temperatures and spread for a design of experiments
+  (core/rom.py lhs_design) to calibrate the multi-zone coach.
+fluent_version: to be recorded when run
+status: planned
+unit_card: kaeser_noske_dhf14
+
+geometry:
+  bay_length: {value: "param:bay_length", unit: m}
+  width:      {value: E-035, unit: m, note: interior width}
+  height:     {value: E-036, unit: m, note: interior height}
+
+parameters:
+  bay_length:      {user_defined: 2.0, unit: m, note: one seat pitch bay}
+  supply_share:    {user_defined: 0.1, unit: "-", note: share of the unit supply delivered to this bay}
+  supply_T:        {user_defined: 14.0, unit: degC, note: DOE setting}
+  occupancy:       {user_defined: 8, unit: "-", note: passengers in the bay (DOE factor)}
+
+solver:
+  models: [k-omega SST, energy, "incompressible ideal gas", "steady pressure-based", "DO radiation (solar)"]
+  schemes: {pressure: second order, momentum: second order upwind, energy: second order upwind}
+  convergence: {continuity: 1.0e-4, energy: 1.0e-7}
+
+boundary_conditions:
+  - {name: unit_supply_airflow, type: mass_flow_inlet, value: "card:supply_airflow", unit: m3/s,
+     note: whole-unit airflow; bay gets supply_share}
+  - {name: supply_share, type: mass_flow_inlet, value: "param:supply_share", unit: "-"}
+  - {name: supply_temperature, type: mass_flow_inlet, value: "param:supply_T", unit: degC}
+  - {name: outside_temperature, type: wall_external, value: E-022, unit: degC}
+  - {name: envelope_k, type: wall_overall_coefficient, value: E-002, unit: W/m2K}
+  - {name: solar_intensity, type: solar_load, value: E-077, unit: W/m2}
+  - {name: passenger_sensible, type: heat_source, value: E-026, unit: W/person}
+  - {name: occupancy, type: heat_source, value: "param:occupancy", unit: "-"}
+  - {name: bay_ends, type: symmetry}
+  - {name: return_grille, type: pressure_outlet}
+
+meshes:      # h = (V / N)^(1/3) with V = 2.0 x 2.8 x 2.2 m3 (planned estimates)
+  - {name: coarse, cell_count: 150000, h: 0.0435}
+  - {name: medium, cell_count: 300000, h: 0.0345}
+  - {name: fine, cell_count: 500000, h: 0.0291}
+
+results: results/{run}_{mesh}.csv
+results_format: >-
+  One row per zone / probe: columns zone, T_C (volume-mean), plus probe rows
+  point, x_m, y_m, z_m, T_C at the UIC 553-1 measuring height (E-012).

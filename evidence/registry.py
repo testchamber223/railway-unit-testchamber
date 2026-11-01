@@ -9,8 +9,9 @@ Every physical constant used by ``core`` must be fetched here, e.g.::
 Validation rules (enforced on load):
     * ``status`` must be one of the ``Status`` values.
     * ``source`` may only be empty when ``status`` is ``assumption``.
-    * ``value`` may only be empty when ``status`` is ``assumption``
-      (an open question that must be resolved before the value is used).
+    * ``value`` may only be empty when ``status`` is ``assumption`` (an open
+      question), or for a sourced row whose notes say "to fill from source"
+      (a value still to be transcribed from the cited paper / standard).
     * ``value`` is a number, or text for definitions (e.g. E-008).
     * ``tolerance`` (optional, same unit as ``value``) is a symmetric +/- band.
     * ``id`` values must be unique.
@@ -67,6 +68,10 @@ class Status(StrEnum):
     PLOT_ONLY = "plot-only assumption"
 
 
+# A sourced row (standard / literature / datasheet) may have an EMPTY value while
+# a person still has to transcribe it from the source; its notes must say so.
+TO_FILL = "to fill from source"
+
 # Statuses that are not sourced: source may be empty; listed as open items.
 UNSOURCED = (Status.ASSUMPTION, Status.PLOT_ONLY)
 
@@ -121,9 +126,10 @@ class EvidenceRecord(BaseModel):
                 raise ValueError(
                     f"{self.id}: empty source is only allowed for status 'assumption'"
                 )
-            if self.value is None:
+            if self.value is None and TO_FILL not in self.notes.lower():
                 raise ValueError(
-                    f"{self.id}: empty value is only allowed for status 'assumption'"
+                    f"{self.id}: empty value is only allowed for status 'assumption' "
+                    f"(or a sourced row whose notes say '{TO_FILL}')"
                 )
         if self.tolerance is not None:
             if self.tolerance < 0:
@@ -136,7 +142,8 @@ class EvidenceRecord(BaseModel):
     def is_open(self) -> bool:
         """True if the record is an assumption or still flagged 'to confirm'."""
         text = f"{self.clause_or_page} {self.notes}".lower()
-        return self.status in UNSOURCED or bool(self.override) or "confirm" in text
+        return (self.status in UNSOURCED or bool(self.override) or self.value is None
+                or "confirm" in text)
 
 
 class Evidence(NamedTuple):

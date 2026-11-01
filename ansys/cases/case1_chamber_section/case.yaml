@@ -1,0 +1,48 @@
+# Case 1 -- climatic-chamber section with a coach section inside.
+# Purpose: chamber air temperature non-uniformity around the coach (the
+# chamber is one well-mixed volume in core/chamber.py until this exists).
+# STATUS: planned. No CFD results exist yet.
+case_id: case1_chamber_section
+description: >-
+  Slice of the CETEMET full-coach chamber (cross-section from E-061,
+  28 x 5 x 5.5 m) containing a coach section; chamber air supplied at the
+  EN 13129 zone I outside temperature.
+purpose: >-
+  Spatial spread of chamber air temperature at the coach surface and at the
+  8 chamber probes (UIC 553-1 App. H), to bound the well-mixed assumption.
+fluent_version: to be recorded when run
+status: planned
+
+geometry:
+  section_length:  {value: "param:section_length", unit: m}
+  chamber_width:   {value: "param:chamber_width", unit: m, note: from E-061 (text 28 x 5 x 5.5)}
+  chamber_height:  {value: "param:chamber_height", unit: m, note: from E-061}
+  coach_width:     {value: E-094, unit: m, note: exterior width}
+  coach_height:    {value: E-095, unit: m, note: exterior height}
+
+parameters:
+  section_length: {user_defined: 5.0, unit: m, note: limited by the 512K-cell licence}
+  chamber_width:  {user_defined: 5.0, unit: m, note: E-061}
+  chamber_height: {user_defined: 5.5, unit: m, note: E-061}
+  inlet_velocity: {user_defined: 1.0, unit: m/s, note: "chamber air-handling outlet, to confirm with CETEMET"}
+
+solver:
+  models: [k-omega SST, energy, "incompressible ideal gas", "steady pressure-based"]
+  schemes: {pressure: second order, momentum: second order upwind, energy: second order upwind}
+  convergence: {continuity: 1.0e-4, energy: 1.0e-7}
+
+boundary_conditions:
+  - {name: chamber_inlet_temperature, type: velocity_inlet, value: E-022, unit: degC}
+  - {name: chamber_inlet_velocity, type: velocity_inlet, value: "param:inlet_velocity", unit: m/s}
+  - {name: chamber_outlet, type: pressure_outlet}
+  - {name: coach_wall_k, type: wall_overall_coefficient, value: E-002, unit: W/m2K}
+  - {name: section_ends, type: symmetry}
+
+meshes:      # h = (V / N)^(1/3) with V = 5 x 5 x 5.5 m3 (planned estimates)
+  - {name: coarse, cell_count: 120000, h: 0.1046}
+  - {name: medium, cell_count: 250000, h: 0.0819}
+  - {name: fine, cell_count: 500000, h: 0.0650}
+
+results: results/{run}_{mesh}.csv
+results_format: >-
+  One row per probe / point: columns point, x_m, y_m, z_m, T_C.

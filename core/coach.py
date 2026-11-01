@@ -522,3 +522,309 @@ def load_coach_definition(
             f"{len(missing)} evidence value(s) missing:\n{lines}",
         )
     return CoachDefinition(name=str(data.get("name", path.stem)), evidence_ids=ids, **values)
+
+
+# ==========================================================================
+# Multi-zone coach (zones along the length)
+# ==========================================================================
+#
+# Zone i (front ... back) has shares of the coach heat capacity, envelope,
+# passengers, solar gain and air volume. Neighbouring zones exchange air:
+# mixing conductance G_mix [W/K] is realised as an equal mass exchange
+# m_x = G_mix / cp_ref in both directions (cp_ref from E-005 at W = 0), so
+# that sensible heat, moisture and total enthalpy are all conserved exactly.
+# Supply air reaches zone i with fraction f_i; the unit draws return air with
+# weights r_i. Where f and r differ, the net flow between zones is carried
+# along the coach (upwind state). Every incoming stream uses the convention
+# of core.loads.supply_air; air leaves a zone at the zone state.
+#
+# With very large G_mix all zones share one state and the model reduces to
+# the single-zone SingleZoneCoach (tested), so pieces 3-7 stay the reference.
+
+LoadCategory = str   # "passengers" | "solar" | "envelope" | "capacity"
+
+
+@dataclass(frozen=True)
+class FixedSupply:
+    """Supply air with a fixed state (CFD-like boundary / verification)."""
+
+    m_da_kg_s: float
+    T_C: float
+    W: float
+
+
+def _shares(name: str, value, n: int) -> tuple[float, ...]:
+    v = tuple(float(x) for x in (value if value is not None else [1.0 / n] * n))
+    if len(v) != n or any(x < 0 for x in v) or abs(sum(v) - 1.0) > 1e-9:
+        raise ValueError(f"{name} needs {n} non-negative values summing to 1, got {v}")
+    return v
+
+
+@dataclass(frozen=True)
+class MultiZoneCoach:
+    """N zones along the coach; defaults: 3 equal zones front / middle / back.
+
+    Attributes:
+        base: the single-zone coach (total C, UA, air volume).
+        zone_names: one name per zone (front first).
+        *_share: fraction of capacity / envelope / passengers / solar / volume
+            per zone (each sums to 1; default equal).
+        G_mix_W_K: mixing conductance between neighbouring zones [W/K].
+        supply_fraction: share of the supply air delivered to each zone.
+        return_weight: share of the return air drawn from each zone.
+        measuring_points: positions of the UIC 553-1 interior measuring
+            points as fractions of the coach length (E-124), or None.
+    """
+
+    base: SingleZoneCoach
+    zone_names: tuple[str, ...] = ("front", "middle", "back")
+    capacity_share: tuple[float, ...] | None = None
+    envelope_share: tuple[float, ...] | None = None
+    passenger_share: tuple[float, ...] | None = None
+    solar_share: tuple[float, ...] | None = None
+    volume_share: tuple[float, ...] | None = None
+    G_mix_W_K: float = 0.0
+    supply_fraction: tuple[float, ...] | None = None
+    return_weight: tuple[float, ...] | None = None
+    measuring_points: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        n = len(self.zone_names)
+        if n < 1:
+            raise ValueError("at least one zone")
+        for name in ("capacity_share", "envelope_share", "passenger_share", "solar_share",
+                     "volume_share", "supply_fraction", "return_weight"):
+            object.__setattr__(self, name, _shares(name, getattr(self, name), n))
+        if not self.G_mix_W_K >= 0:
+            raise ValueError("G_mix_W_K must be >= 0")
+        if self.measuring_points is not None and any(
+                not 0 <= x <= 1 for x in self.measuring_points):
+            raise ValueError("measuring points are fractions of the length, 0..1")
+
+    @property
+    def n(self) -> int:
+        return len(self.zone_names)
+
+    def share(self, category: LoadCategory) -> tuple[float, ...]:
+        return {"passengers": self.passenger_share, "solar": self.solar_share,
+                "envelope": self.envelope_share, "capacity": self.capacity_share}[category]
+
+    def zone_at(self, x: float) -> int:
+        """Zone index containing the position x (fraction of the length)."""
+        return min(int(x * self.n), self.n - 1)
+
+    @staticmethod
+    def measuring_points_from_evidence(evidence: Registry | None = None) -> tuple[float, ...]:
+        """UIC 553-1 measuring-point positions from E-124 ('x1, x2, ...')."""
+        get = evidence.get if evidence is not None else _evidence.get
+        value = get("E-124").value
+        if value is None:
+            raise MissingEvidenceError(["E-124"], "E-124 (UIC 553-1 measuring points) is empty")
+        return tuple(float(x) for x in str(value).split(","))
+
+    def mixing_mass_flow(self, evidence: Registry | None = None) -> float:
+        """m_x = G_mix / cp_ref [kg dry air / s], cp_ref = E-005 (dry air)."""
+        number = evidence.number if evidence is not None else _evidence.number
+        return self.G_mix_W_K / (number("E-005", "kJ/(kg.K)") * 1e3)
+
+    def interface_flows(self, m_supply: float) -> list[float]:
+        """Net flow from zone i to zone i+1 [kg/s] for a supply of m_supply."""
+        cum, out = 0.0, []
+        for i in range(self.n - 1):
+            cum += (self.supply_fraction[i] - self.return_weight[i]) * m_supply
+            out.append(cum)
+        return out
+
+    def steady_state(self, T_out: float, supply: FixedSupply, gains_W: Sequence[float],
+                     W_ref: float | None = None) -> np.ndarray:
+        """Steady zone temperatures [degC], sensible balance, uniform humidity W_ref.
+
+        0 = UA_i (T_out - T_i) + sum over incoming streams m cp (T_in - T_i) + gains_i,
+        cp = cp(W_ref) of moist air from core.psychro (W_ref defaults to the
+        supply humidity). Same streams as ``simulate_multizone``.
+        """
+        n, W = self.n, supply.W if W_ref is None else W_ref
+        cp = psychro.enthalpy(1.0, W) - psychro.enthalpy(0.0, W)
+        A = np.zeros((n, n))
+        b = np.array(gains_W, dtype=float)
+        if b.shape != (n,):
+            raise ValueError(f"gains_W needs {n} values")
+        UA = self.base.UA
+        m_x = self.mixing_mass_flow()
+        for i in range(n):
+            ua = UA * self.envelope_share[i]
+            A[i, i] -= ua
+            b[i] += ua * T_out
+            ms = self.supply_fraction[i] * supply.m_da_kg_s * cp
+            A[i, i] -= ms
+            b[i] += ms * supply.T_C
+        for i, F in enumerate(self.interface_flows(supply.m_da_kg_s)):
+            for src, dst in ((i, i + 1), (i + 1, i)):            # mixing, both ways
+                A[dst, dst] -= m_x * cp
+                A[dst, src] += m_x * cp
+            if F > 0:                                            # advection i -> i+1
+                A[i + 1, i + 1] -= F * cp
+                A[i + 1, i] += F * cp
+            elif F < 0:
+                A[i, i] -= -F * cp
+                A[i, i + 1] += -F * cp
+        return np.linalg.solve(A, -b)
+
+
+def simulate_multizone(
+    mz: MultiZoneCoach,
+    T0: float | Sequence[float],
+    T_out: Input,
+    Q_int: Input,
+    Q_hvac: Input,
+    t_end_s: float,
+    dt_out_s: float,
+    *,
+    W0: float | Sequence[float] | None = None,
+    loads: Sequence[tuple[LoadTerm, LoadCategory]] = (),
+    unit: UnitOperation | None = None,
+    supply: FixedSupply | None = None,
+    p: float | None = None,
+    rtol: float = 1e-8,
+    atol: float = 1e-8,
+) -> pd.DataFrame:
+    """Integrate the multi-zone balances (see the section comment above).
+
+    Q_int is shared by capacity, Q_hvac (removed, verification) by supply
+    fraction; each load term is evaluated with the zone's own state and
+    scaled by the share of its category. ``unit`` (DX unit; return air = mix
+    of the zones by return_weight) or ``supply`` (fixed state) provide supply
+    air; both need W0.
+
+    Returns per-zone columns T_C_<zone>, W_<zone>, RH_<zone>, plus T_mean
+    (capacity-weighted), W_mean (volume-weighted), uic_mean (mean of the zones
+    at the UIC 553-1 measuring points, NaN if none), spread (max - min),
+    front_to_back (first - last zone), totals Q_env_W, Q_int_W, Q_hvac_W,
+    Q_load_<name>_W, m_load_<name>_kg_s, and for supplied air
+    supply_Q_total_W = m_s (h_supply - h_return) and unit_* summaries.
+    ``df.attrs`` holds C_zone, M_zone (dry-air mass per zone).
+    """
+    n = mz.n
+    T0v = np.full(n, float(T0)) if np.isscalar(T0) else np.array(T0, float)
+    humid = W0 is not None
+    if (unit is not None or supply is not None or loads) and not humid:
+        raise ValueError("loads, a unit or a fixed supply need the humidity state: pass W0")
+    if unit is not None and supply is not None:
+        raise ValueError("give either a unit or a fixed supply, not both")
+    W0v = (np.full(n, float(W0)) if np.isscalar(W0) else np.array(W0, float)) if humid else None
+    f_out, f_int, f_hvac = _as_function(T_out), _as_function(Q_int), _as_function(Q_hvac)
+    C = mz.base.heat_capacity_J_K * np.array(mz.capacity_share)
+    UA = mz.base.UA * np.array(mz.envelope_share)
+    M = (dry_air_mass_kg(mz.base, float(np.dot(mz.capacity_share, T0v)),
+                         float(np.dot(mz.volume_share, W0v)), p) * np.array(mz.volume_share)
+         if humid else None)
+    m_x = mz.mixing_mass_flow()
+    fs, rw = np.array(mz.supply_fraction), np.array(mz.return_weight)
+    shares = {cat: np.array(mz.share(cat)) for _, cat in loads}
+    if unit is not None:
+        f_rh = _as_function(unit.RH_out)
+
+    def supply_state(t, T, W):
+        """(T_s, W_s, m_s, details) of the supply air."""
+        if supply is not None:
+            return supply.T_C, supply.W, supply.m_da_kg_s, None
+        m_r = rw  # weights; absolute flow set by the unit
+        h_r = float(np.dot(m_r, [psychro.enthalpy(Ti, Wi) for Ti, Wi in zip(T, W)]))
+        W_r = float(np.dot(m_r, W))
+        T_r = psychro.dry_bulb_from_enthalpy(h_r, W_r)
+        T_o = f_out(t)
+        W_f = psychro.humidity_ratio(T_o, f_rh(t), p)
+        res = unit.unit.operate(T_r, W_r, T_o, W_f, T_o, unit.mode, unit.part_load)
+        s = res.supply
+        return s.T_C, s.W, s.m_da, (res, h_r, W_f)
+
+    def balances(t, T, W):
+        Q = UA * (f_out(t) - T) + f_int(t) * np.array(mz.capacity_share) - f_hvac(t) * fs
+        m = np.zeros(n)
+        for term, cat in loads:
+            for i in range(n):
+                q_i, m_i = term.fn(t, T[i], W[i] if humid else math.nan)
+                Q[i] += shares[cat][i] * q_i
+                m[i] += shares[cat][i] * m_i
+        streams = []                           # (m, T_in, W_in, zone)
+        if humid:
+            for i in range(n - 1):             # mixing exchange, both directions
+                streams.append((m_x, T[i + 1], W[i + 1], i))
+                streams.append((m_x, T[i], W[i], i + 1))
+        info = None
+        if unit is not None or supply is not None:
+            T_s, W_s, m_s, info = supply_state(t, T, W)
+            for i in range(n):
+                streams.append((fs[i] * m_s, T_s, W_s, i))
+            for i, F in enumerate(mz.interface_flows(m_s)):
+                if F > 0:
+                    streams.append((F, T[i], W[i], i + 1))
+                elif F < 0:
+                    streams.append((-F, T[i + 1], W[i + 1], i))
+            info = (T_s, W_s, m_s, info)
+        elif mz.G_mix_W_K > 0 and not humid:   # dry model: sensible mixing only
+            for i in range(n - 1):
+                q = mz.G_mix_W_K * (T[i + 1] - T[i])
+                Q[i] += q
+                Q[i + 1] -= q
+        for mm, Ti, Wi, z in streams:
+            if mm > 0:
+                q_s, _, m_w = _loads.supply_air(mm, Ti, Wi, T[z], W[z])
+                Q[z] += q_s
+                m[z] += m_w
+        return Q, m, info
+
+    def rhs(t, y):
+        T = y[:n]
+        W = y[n:] if humid else np.full(n, math.nan)
+        Q, m, _ = balances(t, T, W)
+        return np.concatenate([Q / C, m / M]) if humid else Q / C
+
+    t_eval = _output_times(t_end_s, dt_out_s)
+    y0 = np.concatenate([T0v, W0v]) if humid else T0v
+    sol = solve_ivp(rhs, (0.0, t_eval[-1]), y0, method="LSODA", t_eval=t_eval,
+                    rtol=rtol, atol=atol)
+    if not sol.success:
+        raise RuntimeError(f"{mz.base.name}: solver failed: {sol.message}")
+
+    rows = []
+    for k, t in enumerate(sol.t):
+        T = sol.y[:n, k]
+        W = sol.y[n:, k] if humid else np.full(n, math.nan)
+        row = {"t_s": t}
+        for i, name in enumerate(mz.zone_names):
+            row[f"T_C_{name}"] = T[i]
+            row[f"W_{name}"] = W[i]
+            row[f"RH_{name}"] = (psychro.rh_from_humidity_ratio(T[i], W[i], p)
+                                 if humid else math.nan)
+        row["T_mean"] = float(np.dot(mz.capacity_share, T))
+        row["W_mean"] = float(np.dot(mz.volume_share, W)) if humid else math.nan
+        row["uic_mean"] = (float(np.mean([T[mz.zone_at(x)] for x in mz.measuring_points]))
+                           if mz.measuring_points else math.nan)
+        row["spread"] = float(T.max() - T.min())
+        row["front_to_back"] = float(T[0] - T[-1])
+        row["Q_env_W"] = float(np.sum(UA * (f_out(t) - T)))
+        row["Q_int_W"] = f_int(t)
+        row["Q_hvac_W"] = f_hvac(t)
+        for term, cat in loads:
+            qm = np.array([term.fn(t, T[i], W[i]) for i in range(n)])
+            row[f"Q_load_{term.name}_W"] = float(np.dot(shares[cat], qm[:, 0]))
+            row[f"m_load_{term.name}_kg_s"] = float(np.dot(shares[cat], qm[:, 1]))
+        if unit is not None or supply is not None:
+            _, _, (T_s, W_s, m_s, det) = balances(t, T, W)
+            h_ret = float(np.dot(rw, [psychro.enthalpy(Ti, Wi) for Ti, Wi in zip(T, W)]))
+            row["supply_T_C"], row["supply_W"], row["supply_m_kg_s"] = T_s, W_s, m_s
+            row["supply_Q_total_W"] = m_s * (psychro.enthalpy(T_s, W_s) - h_ret)
+            if det is not None:
+                res, _, W_f = det
+                c = res.coil
+                row["unit_Q_coil_total_W"] = c.Q_total_W if c else 0.0
+                row["unit_Q_fan_W"] = res.Q_fan_W
+                row["unit_Q_heater_W"] = res.Q_heater_W
+                row["unit_Q_fresh_enthalpy_W"] = res.m_fresh_kg_s * (
+                    psychro.enthalpy(f_out(t), W_f) - h_ret)
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    df.attrs["C_zone"] = C
+    df.attrs["M_zone"] = M
+    return df

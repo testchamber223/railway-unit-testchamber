@@ -12,8 +12,8 @@ registry — no hard-coded numbers in the physics.
 | `evidence/`   | `evidence.csv` + `registry.py` loader/validator                    |
 | `data/`       | Coach definitions (every number an evidence ID) and HVAC unit cards (`data/units/`) |
 | `procedures/` | Test procedure files (YAML, one standard each) run by `core.procedures.run_procedure` |
-| `validation/` | Verification cases                                                 |
-| `ansys/`      | Future PyFluent scripts                                            |
+| `validation/` | Verification cases, GCI (mesh convergence), Case 0 comparison     |
+| `ansys/`      | CFD case files (`cases/<id>/case.yaml`), Case 0 inputs; result CSVs only |
 | `web/`        | Future website                                                     |
 | `docs/`       | Documentation                                                      |
 | `tests/`      | pytest suite                                                       |
