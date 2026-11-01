@@ -18,3 +18,17 @@ fan_power:                    {value: 1500, unit: W, source: verification-only, 
 fan_position:                 {value: draw-through, unit: "-", source: verification-only, status: assumption}
 heating_capacity:             {value: 20, unit: kW, source: verification-only, status: assumption}
 refrigerant:                  {value: "n/a (verification)", unit: "-", source: verification-only, status: assumption}
+# controller (verification-only)
+control_type:              {value: on_off, unit: "-", source: verification-only, status: assumption}
+control_sensor:            {value: return_air, unit: "-", source: verification-only, status: assumption}
+control_dead_band:         {value: 1.0, unit: K, source: verification-only, status: assumption}
+control_heating_dead_band: {value: 1.0, unit: K, source: verification-only, status: assumption}
+control_neutral_zone:      {value: 3.0, unit: K, source: verification-only, status: assumption}
+control_stage_fractions:   {value: "0.5, 1.0", unit: "-", source: verification-only, status: assumption}
+control_kp:                {value: 0.5, unit: 1/K, source: verification-only, status: assumption}
+control_ki:                {value: 0.0003, unit: 1/(K.s), source: verification-only, status: assumption}
+control_min_fraction:      {value: 0.3, unit: "-", source: verification-only, status: assumption}
+control_max_fraction:      {value: 1.0, unit: "-", source: verification-only, status: assumption}
+control_min_on_time:       {value: 180, unit: s, source: verification-only, status: assumption}
+control_min_off_time:      {value: 180, unit: s, source: verification-only, status: assumption}
+control_sample_period:     {value: 10, unit: s, source: verification-only, status: assumption}

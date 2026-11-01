@@ -1,7 +1,7 @@
 # Unit cooling capacity at the unit card's own rating condition, measured by
 # the air-enthalpy method in the unit test room.
 name: Unit cooling capacity at rating condition
-standard: ASHRAE 37 / EN 14511-3
+standard: EN 14511-3
 clause: to confirm
 facility: unit_room
 description: >-

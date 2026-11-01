@@ -114,6 +114,20 @@ CARD_FIELDS: dict[str, tuple[str, bool]] = {
     "heating_capacity": ("W", True),
     "heating_rating_outdoor_dry_bulb": ("degC", False),
     "refrigerant": ("text", True),
+    # controller (core.control); required per control_type, see ControlParams.from_card
+    "control_type": ("text", True),              # on_off | staged | inverter
+    "control_sensor": ("text", False),           # return_air | cabin_mean
+    "control_dead_band": ("K", False),           # cooling dead band
+    "control_heating_dead_band": ("K", False),
+    "control_neutral_zone": ("K", False),        # cooling setpoint - heating setpoint
+    "control_stage_fractions": ("text", False),  # staged: e.g. "0.5, 1.0"
+    "control_kp": ("1/K", False),                # inverter PI gains
+    "control_ki": ("1/(K.s)", False),
+    "control_min_fraction": ("-", False),        # inverter capacity range
+    "control_max_fraction": ("-", False),
+    "control_min_on_time": ("s", False),
+    "control_min_off_time": ("s", False),
+    "control_sample_period": ("s", False),
 }
 
 # Unit conversions accepted on cards: unit -> (SI unit, factor)
@@ -122,6 +136,10 @@ _TO_SI: dict[str, tuple[str, float]] = {
     "degC": ("degC", 1.0),
     "m3/s": ("m3/s", 1.0), "m3/h": ("m3/s", 1.0 / 3600.0),
     "-": ("-", 1.0), "%": ("-", 1e-2),
+    "K": ("K", 1.0),
+    "s": ("s", 1.0), "min": ("s", 60.0),
+    "1/K": ("1/K", 1.0),
+    "1/(K.s)": ("1/(K.s)", 1.0), "1/(K.min)": ("1/(K.s)", 1.0 / 60.0),
 }
 
 
@@ -151,6 +169,19 @@ class UnitCard(BaseModel):
     heating_capacity: CardField | None = None
     heating_rating_outdoor_dry_bulb: CardField | None = None
     refrigerant: CardField | None = None
+    control_type: CardField | None = None
+    control_sensor: CardField | None = None
+    control_dead_band: CardField | None = None
+    control_heating_dead_band: CardField | None = None
+    control_neutral_zone: CardField | None = None
+    control_stage_fractions: CardField | None = None
+    control_kp: CardField | None = None
+    control_ki: CardField | None = None
+    control_min_fraction: CardField | None = None
+    control_max_fraction: CardField | None = None
+    control_min_on_time: CardField | None = None
+    control_min_off_time: CardField | None = None
+    control_sample_period: CardField | None = None
 
     @model_validator(mode="after")
     def _check_units(self) -> UnitCard:
@@ -165,6 +196,11 @@ class UnitCard(BaseModel):
                 raise ValueError(f"{name}: unit {f.unit!r} cannot be converted to {si}")
             elif f.value is not None and not isinstance(f.value, float | int):
                 raise ValueError(f"{name}: expected a number, got {f.value!r}")
+        for name, allowed in (("control_type", ("on_off", "staged", "inverter")),
+                              ("control_sensor", ("return_air", "cabin_mean"))):
+            f = getattr(self, name)
+            if f is not None and f.value is not None and f.value not in allowed:
+                raise ValueError(f"{name} must be one of {allowed}")
         if self.rating_reference is not None and self.rating_reference.value is not None \
                 and self.rating_reference.value not in RATING_REFERENCES:
             raise ValueError(f"rating_reference must be one of {RATING_REFERENCES}")

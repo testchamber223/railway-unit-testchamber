@@ -12,6 +12,9 @@ E-038: 12.0      # glazing per side, m2
 E-039: 80        # seats
 E-040: 5.0e6     # effective heat capacity, J/K
 E-041: 2000.0    # equipment, W
+E-093: 24.6      # exterior length, m
+E-094: 2.9       # exterior width, m
+E-095: 2.8       # exterior height, m (box surface 296.7 m2 vs Ae 300 m2)
 E-026: 70.0      # passenger sensible, W/person
 E-027: 50.0      # passenger latent, W/person
 E-029: 17.0      # h_o, W/m2K
@@ -43,3 +46,28 @@ E-073: 0.2       # stability drift, K/h
 E-074: 1.0       # comfort measurement, h
 E-075: 0.05      # capacity acceptance, relative
 E-076: 0.5       # capacity measurement, h
+# fix a: EN 13129 solar rows and UIC 553-1 comfort rows (E-077..E-092)
+E-077: 800.0     # EN 13129 zone I solar, W/m2
+E-078: 700.0     # EN 13129 zone II solar, W/m2
+E-079: 0.866     # EN 13129 vertical factor
+E-088: 0.40      # UIC 553-1 comfort chamber RH
+E-089: 1.0       # UIC 553-1 stability window, h
+E-090: 0.2       # UIC 553-1 stability drift, K/h
+E-091: 1.0       # UIC 553-1 measurement, h
+E-092: {value: 24.5, tolerance: 2.5}   # UIC 553-1 interior band, degC
+# piece 7: sensor resolution / time constant / sampling (E-096..E-108),
+# cabin control probes (E-109)
+E-096: 0.01      # T resolution, K
+E-097: 10.0      # T time constant, s
+E-098: 1.0       # T sampling, s
+E-099: 0.001     # RH resolution
+E-100: 15.0      # RH time constant, s
+E-101: 1.0       # RH sampling, s
+E-102: 0.2       # dew-point accuracy, +/- K
+E-103: 0.01      # dew-point resolution, K
+E-104: 30.0      # dew-point time constant, s
+E-105: 1.0       # dew-point sampling, s
+E-106: 0.001     # airflow resolution (relative)
+E-107: 2.0       # airflow time constant, s
+E-108: 1.0       # airflow sampling, s
+E-109: 4         # cabin control probes

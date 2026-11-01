@@ -35,3 +35,5 @@ heating_rating_outdoor_dry_bulb:
   {value: -20, unit: degC, source: "Kaeser-Noske DHF14-RVKE datasheet, railway-news.com", page: 1, status: datasheet}
 refrigerant:
   {value: null, unit: "-", status: assumption}
+control_type:
+  {value: null, unit: "-", status: assumption}

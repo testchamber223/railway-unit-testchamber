@@ -1,15 +1,14 @@
-# Steady comfort test, climatic zone II.
-# Solar pairing: E-016 is the UIC 553-1 Zone II value for 35 degC outside,
-# matching the EN 13129 Zone II design temperature (E-023).
-name: Steady comfort, zone II
-standard: EN 13129:2016 / UIC 553-1
+# Steady comfort test, EN 13129, climatic zone II.
+# Uses EN 13129 rows only: outside temperature E-023, solar E-078 / E-079,
+# chamber RH E-071, stability E-072 / E-073, measurement E-074, band E-024.
+name: Steady comfort, EN 13129 zone II
+standard: EN 13129:2016
 clause: to confirm
 facility: vehicle_chamber
 description: >-
-  Chamber at the EN 13129 zone II design outside temperature (E-023) with
-  UIC 553-1 solar load (E-016), full passenger load, unit cooling at full load
-  (no controller until piece 7). Pass if the cabin mean is inside the comfort
-  band E-024.
+  Chamber at the EN 13129 zone II design outside temperature with the EN 13129
+  solar load, full passenger load, unit cooling at full load. Pass if the
+  cabin mean is inside the EN 13129 comfort band E-024.
 
 parameters:
   max_settle:
@@ -24,7 +23,7 @@ steps:
   - set_conditions:
       chamber_T: E-023
       chamber_RH: E-071
-      solar: {intensity: E-016, vertical_factor: E-021, absorptance: E-030,
+      solar: {intensity: E-078, vertical_factor: E-079, absorptance: E-030,
               g_value: E-031, h_o: E-029, surfaces: [roof, left_side]}
       passengers: {count: E-039, sensible_W: E-026, latent_W: E-027}
       unit: {mode: cooling, part_load: full}
@@ -34,6 +33,6 @@ steps:
 measured_quantities: [cabin_T_mean, cabin_RH_mean, chamber_T_mean]
 
 acceptance:
-  - name: cabin mean temperature within the comfort band
+  - name: cabin mean temperature within the EN 13129 comfort band
     quantity: cabin_T_mean
     within_band: E-024

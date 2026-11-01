@@ -5,7 +5,7 @@ standard: EN 13129:2016
 clause: to confirm
 facility: vehicle_chamber
 description: >-
-  Soak at E-022 with UIC 553-1 solar load (E-013 on the roof, x E-021 on the
+  Soak at E-022 with EN 13129 solar load (E-077 on the roof, x E-079 on the
   side), unit off; then unit at full load (no controller until piece 7) until
   the cabin is within E-068 +/- E-069. Pass if that takes at most E-070.
 
@@ -26,7 +26,7 @@ steps:
   - set_conditions:
       chamber_T: E-022
       chamber_RH: E-071
-      solar: {intensity: E-013, vertical_factor: E-021, absorptance: E-030,
+      solar: {intensity: E-077, vertical_factor: E-079, absorptance: E-030,
               g_value: E-031, h_o: E-029, surfaces: [roof, left_side]}
       unit: {mode: "off"}
   - hold_until_stable: {max_duration: param:max_soak}

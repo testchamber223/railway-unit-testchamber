@@ -11,7 +11,7 @@ registry — no hard-coded numbers in the physics.
 | `core/`       | Physics library (psychrometrics, coach, unit, chamber, control, sensors, procedures) |
 | `evidence/`   | `evidence.csv` + `registry.py` loader/validator                    |
 | `data/`       | Coach definitions (every number an evidence ID) and HVAC unit cards (`data/units/`) |
-| `procedures/` | Test procedure files (YAML) run by `core.procedures.run_procedure` |
+| `procedures/` | Test procedure files (YAML, one standard each) run by `core.procedures.run_procedure` |
 | `validation/` | Verification cases                                                 |
 | `ansys/`      | Future PyFluent scripts                                            |
 | `web/`        | Future website                                                     |

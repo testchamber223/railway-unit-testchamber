@@ -1,0 +1,39 @@
+# Steady comfort test, UIC 553-1, climatic zone I, hottest Table 5.4.4 pair.
+# Uses UIC 553-1 rows only: outside temperature E-080 (40 degC) paired with
+# solar E-013 (800 W/m2), vertical factor E-021 (App. B), chamber RH E-088,
+# stability E-089 / E-090, measurement E-091, interior band E-092.
+name: Steady comfort, UIC 553-1 zone I (40 degC / 800 W/m2)
+standard: UIC 553-1, 2nd ed. 2005
+clause: 5.4.4 (confirm against the PDF)
+facility: vehicle_chamber
+description: >-
+  Chamber at the UIC 553-1 Table 5.4.4 zone I pair (40 degC with 800 W/m2),
+  full passenger load, unit cooling at full load. Pass if the cabin mean is
+  inside the UIC 553-1 interior band E-092.
+
+parameters:
+  max_settle:
+    user_defined: 48
+    unit: h
+    note: Practical limit to reach steady state.
+
+initial_state: soaked
+stability: {signal: cabin_T, window: E-089, max_drift: E-090}
+
+steps:
+  - set_conditions:
+      chamber_T: E-080
+      chamber_RH: E-088
+      solar: {intensity: E-013, vertical_factor: E-021, absorptance: E-030,
+              g_value: E-031, h_o: E-029, surfaces: [roof, left_side]}
+      passengers: {count: E-039, sensible_W: E-026, latent_W: E-027}
+      unit: {mode: cooling, part_load: full}
+  - hold_until_stable: {max_duration: param:max_settle}
+  - measure: {duration: E-091}
+
+measured_quantities: [cabin_T_mean, cabin_RH_mean, chamber_T_mean]
+
+acceptance:
+  - name: cabin mean temperature within the UIC 553-1 interior band
+    quantity: cabin_T_mean
+    within_band: E-092

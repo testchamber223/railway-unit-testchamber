@@ -163,7 +163,8 @@ def test_every_load_is_active(combined):
 def test_reference_coach_refuses_missing_evidence():
     with pytest.raises(MissingEvidenceError) as exc:
         load_coach_definition()
-    expected = [f"E-0{i}" for i in range(34, 42)]
+    expected = ["E-034", "E-035", "E-036", "E-093", "E-094", "E-095",
+                "E-037", "E-038", "E-039", "E-040", "E-041"]
     assert exc.value.ids == expected
     for ref in expected:
         assert ref in str(exc.value)
@@ -175,6 +176,7 @@ def _complete_files(tmp_path: Path, yaml_overrides=None, unit_overrides=None):
         "E-901": ("1.2", "W/m2K"), "E-902": ("24", "m"), "E-903": ("2.8", "m"),
         "E-904": ("2.2", "m"), "E-905": ("300", "m2"), "E-906": ("12", "m2"),
         "E-907": ("80", "-"), "E-908": ("5e6", "J/K"), "E-909": ("2000", "W"),
+        "E-910": ("24.6", "m"), "E-911": ("2.9", "m"), "E-912": ("2.8", "m"),
     }
     for ref, unit in (unit_overrides or {}).items():
         rows[ref] = (rows[ref][0], unit)
@@ -188,6 +190,7 @@ def _complete_files(tmp_path: Path, yaml_overrides=None, unit_overrides=None):
         "height_m": "E-904", "envelope_area_Ae_m2": "E-905",
         "glazing_area_per_side_m2": "E-906", "seats": "E-907",
         "heat_capacity_J_K": "E-908", "equipment_load_W": "E-909",
+        "exterior_length_m": "E-910", "exterior_width_m": "E-911", "exterior_height_m": "E-912",
     }
     fields.update(yaml_overrides or {})
     yaml_path = tmp_path / "coach.yaml"
@@ -203,6 +206,9 @@ def test_loader_resolves_complete_definition(tmp_path):
     model = d.thermal_model()
     assert model.UA == pytest.approx(1.2 * 300)
     assert model.air_volume_m3 == pytest.approx(24 * 2.8 * 2.2)
+    assert d.roof_area_m2 == pytest.approx(24.6 * 2.9)          # exterior dimensions
+    assert d.side_area_m2 == pytest.approx(24.6 * 2.8)
+    assert d.exterior_volume_m3 == pytest.approx(24.6 * 2.9 * 2.8)
 
 
 def test_loader_rejects_numbers_instead_of_ids(tmp_path):

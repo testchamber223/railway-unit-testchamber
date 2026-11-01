@@ -204,6 +204,127 @@ def _output_times(t_end_s: float, dt_out_s: float) -> np.ndarray:
 # Simulation
 # --------------------------------------------------------------------------
 
+class ZoneSystem:
+    """Right-hand side and result table of the coach balances for FIXED inputs.
+
+    Used by ``simulate`` (one integration) and by core.control (one
+    ZoneSystem per interval of constant controller output, so switching
+    events restart the integration). State y = [T] or [T, W].
+    """
+
+    def __init__(self, coach: SingleZoneCoach, T_out: Input, Q_int: Input, Q_hvac: Input, *,
+                 loads: Sequence[LoadTerm] = (), unit: UnitOperation | None = None,
+                 p: float | None = None, M_da: float | None = None) -> None:
+        self.coach, self.p = coach, p
+        self.f_out, self.f_int, self.f_hvac = (_as_function(T_out), _as_function(Q_int),
+                                               _as_function(Q_hvac))
+        self.loads, self.unit = tuple(loads), unit
+        self.humid = M_da is not None
+        self.M_da = M_da if self.humid else math.nan
+        if self.loads and not self.humid:
+            raise ValueError("load terms need the humidity state: pass W0")
+        if len({term.name for term in self.loads}) != len(self.loads):
+            raise ValueError("load term names must be unique")
+        if unit is not None:
+            if not self.humid:
+                raise ValueError("'with unit' mode needs the humidity state: pass W0")
+            fresh = [t.name for t in self.loads if t.is_fresh_air or t.name == "fresh_air"]
+            if fresh:
+                raise ValueError(f"'with unit' mode: fresh air enters via the unit's mixing box; "
+                                 f"remove load term(s) {fresh}")
+            self.f_rh = _as_function(unit.RH_out)
+
+    def unit_eval(self, t: float, T: float, W: float) -> tuple[UnitResult, float, float, float]:
+        T_o = self.f_out(t)
+        W_f = psychro.humidity_ratio(T_o, self.f_rh(t), self.p)
+        res = self.unit.unit.operate(T, W, T_o, W_f, T_o, self.unit.mode, self.unit.part_load)
+        s = res.supply
+        q_s, _, m_w = _loads.supply_air(s.m_da, s.T_C, s.W, T, W)
+        return res, q_s, m_w, W_f
+
+    @staticmethod
+    def m_cond(t: float, T: float, W: float) -> float:
+        return 0.0  # condensation in the cabin: not modelled yet
+
+    def derivatives(self, t: float, T: float, W: float) -> tuple[float, float]:
+        """(dT/dt [K/s], dW/dt [1/s]); dW/dt is NaN without humidity."""
+        Q = self.coach.UA * (self.f_out(t) - T) + self.f_int(t) - self.f_hvac(t)
+        m = -self.m_cond(t, T, W)
+        for term in self.loads:
+            q_i, m_i = term.fn(t, T, W)
+            Q += q_i
+            m += m_i
+        if self.unit is not None:
+            _, q_s, m_w, _ = self.unit_eval(t, T, W)
+            Q += q_s
+            m += m_w
+        return Q / self.coach.heat_capacity_J_K, (m / self.M_da if self.humid else math.nan)
+
+    def rhs(self, t: float, y: np.ndarray) -> list[float]:
+        dT, dW = self.derivatives(t, y[0], y[1] if self.humid else math.nan)
+        return [dT, dW] if self.humid else [dT]
+
+    def frame(self, t: np.ndarray, T: np.ndarray, W: np.ndarray | None,
+              extra: dict | None = None) -> pd.DataFrame:
+        """Result table (see ``simulate``) at times t for states T, W.
+
+        ``extra`` adds columns (built in one go, which is much faster than
+        adding them afterwards).
+        """
+        t, T = np.asarray(t, float), np.asarray(T, float)
+        humid, p = self.humid, self.p
+        f_out, f_int, f_hvac = self.f_out, self.f_int, self.f_hvac
+        W = np.asarray(W, float) if humid else np.full_like(t, math.nan)
+        RH = (np.array([psychro.rh_from_humidity_ratio(Ti, Wi, p) for Ti, Wi in zip(T, W)])
+              if humid else np.full_like(t, math.nan))
+        T_out_t = np.array([f_out(ti) for ti in t])
+        df = pd.DataFrame({
+            "t_s": t,
+            "T_C": T,
+            "W_kg_kg": W,
+            "RH": RH,
+            "Q_env_W": self.coach.UA * (T_out_t - T),
+            "Q_int_W": [f_int(ti) for ti in t],
+            "Q_hvac_W": [f_hvac(ti) for ti in t],
+            "m_cond_kg_s": [self.m_cond(ti, Ti, Wi) for ti, Ti, Wi in zip(t, T, W)],
+            **(extra or {}),
+        })
+        for term in self.loads:
+            q_m = np.array([term.fn(ti, Ti, Wi) for ti, Ti, Wi in zip(t, T, W)])
+            df[f"Q_load_{term.name}_W"] = q_m[:, 0]
+            df[f"m_load_{term.name}_kg_s"] = q_m[:, 1]
+        if self.unit is not None:
+            rows = []
+            for ti, Ti, Wi in zip(t, T, W):
+                res, q_s, m_w, W_f = self.unit_eval(ti, Ti, Wi)
+                s, c = res.supply, res.coil
+                h_z = psychro.enthalpy(Ti, Wi)
+                rows.append({
+                    "Q_load_unit_supply_W": q_s,
+                    "m_load_unit_supply_kg_s": m_w,
+                    "unit_T_supply_C": s.T_C,
+                    "unit_W_supply_kg_kg": s.W,
+                    "unit_m_supply_kg_s": s.m_da,
+                    "unit_m_fresh_kg_s": res.m_fresh_kg_s,
+                    "unit_T_mixed_C": res.mixed.T_C,
+                    "unit_W_mixed_kg_kg": res.mixed.W,
+                    "unit_Q_coil_total_W": c.Q_total_W if c else 0.0,
+                    "unit_Q_coil_sensible_W": c.Q_sensible_W if c else 0.0,
+                    "unit_shr": c.shr if c else math.nan,
+                    "unit_m_condensate_kg_s": c.condensate_kg_s if c else 0.0,
+                    "unit_coil_wet": c.wet if c else False,
+                    "unit_extrapolated": c.extrapolated if c else None,
+                    "unit_Q_fan_W": res.Q_fan_W,
+                    "unit_Q_heater_W": res.Q_heater_W,
+                    "unit_Q_fresh_enthalpy_W":
+                        res.m_fresh_kg_s * (psychro.enthalpy(f_out(ti), W_f) - h_z),
+                    "unit_Q_supply_total_W": s.m_da * (psychro.enthalpy(s.T_C, s.W) - h_z),
+                })
+            df = pd.concat([df, pd.DataFrame(rows, index=df.index)], axis=1)
+        df.attrs["M_da_kg"] = self.M_da
+        return df
+
+
 def simulate(
     coach: SingleZoneCoach,
     T0: float,
@@ -256,108 +377,17 @@ def simulate(
 
     Solver: scipy.integrate.solve_ivp, method LSODA.
     """
-    f_out, f_int, f_hvac = _as_function(T_out), _as_function(Q_int), _as_function(Q_hvac)
-    UA, C = coach.UA, coach.heat_capacity_J_K
+    zone = ZoneSystem(coach, T_out, Q_int, Q_hvac, loads=loads, unit=unit, p=p,
+                      M_da=dry_air_mass_kg(coach, T0, W0, p) if W0 is not None else None)
     t_eval = _output_times(t_end_s, dt_out_s)
-    loads = tuple(loads)
-    humid = W0 is not None
-    if loads and not humid:
-        raise ValueError("load terms need the humidity state: pass W0")
-    if len({term.name for term in loads}) != len(loads):
-        raise ValueError("load term names must be unique")
-    if unit is not None:
-        if not humid:
-            raise ValueError("'with unit' mode needs the humidity state: pass W0")
-        fresh = [t.name for t in loads if t.is_fresh_air or t.name == "fresh_air"]
-        if fresh:
-            raise ValueError(f"'with unit' mode: fresh air enters via the unit's mixing box; "
-                             f"remove load term(s) {fresh}")
-        f_rh = _as_function(unit.RH_out)
-    M_da = dry_air_mass_kg(coach, T0, W0, p) if humid else math.nan
-
-    def unit_eval(t: float, T: float, W: float) -> tuple[UnitResult, float, float, float]:
-        T_o = f_out(t)
-        W_f = psychro.humidity_ratio(T_o, f_rh(t), p)
-        res = unit.unit.operate(T, W, T_o, W_f, T_o, unit.mode, unit.part_load)
-        s = res.supply
-        q_s, _, m_w = _loads.supply_air(s.m_da, s.T_C, s.W, T, W)
-        return res, q_s, m_w, W_f
-
-    def m_cond(t: float, T: float, W: float) -> float:
-        return 0.0  # condensation on the evaporator: not modelled yet
-
-    def rhs(t: float, y: np.ndarray) -> list[float]:
-        T = y[0]
-        W = y[1] if humid else math.nan
-        Q = UA * (f_out(t) - T) + f_int(t) - f_hvac(t)
-        m = -m_cond(t, T, W)
-        for term in loads:
-            q_i, m_i = term.fn(t, T, W)
-            Q += q_i
-            m += m_i
-        if unit is not None:
-            _, q_s, m_w, _ = unit_eval(t, T, W)
-            Q += q_s
-            m += m_w
-        return [Q / C, m / M_da] if humid else [Q / C]
-
-    y0 = [float(T0), float(W0)] if humid else [float(T0)]
+    y0 = [float(T0), float(W0)] if zone.humid else [float(T0)]
     sol = solve_ivp(
-        rhs, (0.0, t_eval[-1]), y0, method="LSODA",
+        zone.rhs, (0.0, t_eval[-1]), y0, method="LSODA",
         t_eval=t_eval, rtol=rtol, atol=atol, max_step=max_step,
     )
     if not sol.success:
         raise RuntimeError(f"{coach.name}: solver failed: {sol.message}")
-
-    t, T = sol.t, sol.y[0]
-    W = sol.y[1] if humid else np.full_like(t, math.nan)
-    RH = (np.array([psychro.rh_from_humidity_ratio(Ti, Wi, p) for Ti, Wi in zip(T, W)])
-          if humid else np.full_like(t, math.nan))
-    T_out_t = np.array([f_out(ti) for ti in t])
-    df = pd.DataFrame({
-        "t_s": t,
-        "T_C": T,
-        "W_kg_kg": W,
-        "RH": RH,
-        "Q_env_W": UA * (T_out_t - T),
-        "Q_int_W": [f_int(ti) for ti in t],
-        "Q_hvac_W": [f_hvac(ti) for ti in t],
-        "m_cond_kg_s": [m_cond(ti, Ti, Wi) for ti, Ti, Wi in zip(t, T, W)],
-    })
-    for term in loads:
-        q_m = np.array([term.fn(ti, Ti, Wi) for ti, Ti, Wi in zip(t, T, W)])
-        df[f"Q_load_{term.name}_W"] = q_m[:, 0]
-        df[f"m_load_{term.name}_kg_s"] = q_m[:, 1]
-    if unit is not None:
-        rows = []
-        for ti, Ti, Wi in zip(t, T, W):
-            res, q_s, m_w, W_f = unit_eval(ti, Ti, Wi)
-            s, c = res.supply, res.coil
-            h_z = psychro.enthalpy(Ti, Wi)
-            rows.append({
-                "Q_load_unit_supply_W": q_s,
-                "m_load_unit_supply_kg_s": m_w,
-                "unit_T_supply_C": s.T_C,
-                "unit_W_supply_kg_kg": s.W,
-                "unit_m_supply_kg_s": s.m_da,
-                "unit_m_fresh_kg_s": res.m_fresh_kg_s,
-                "unit_T_mixed_C": res.mixed.T_C,
-                "unit_W_mixed_kg_kg": res.mixed.W,
-                "unit_Q_coil_total_W": c.Q_total_W if c else 0.0,
-                "unit_Q_coil_sensible_W": c.Q_sensible_W if c else 0.0,
-                "unit_shr": c.shr if c else math.nan,
-                "unit_m_condensate_kg_s": c.condensate_kg_s if c else 0.0,
-                "unit_coil_wet": c.wet if c else False,
-                "unit_extrapolated": c.extrapolated if c else None,
-                "unit_Q_fan_W": res.Q_fan_W,
-                "unit_Q_heater_W": res.Q_heater_W,
-                "unit_Q_fresh_enthalpy_W":
-                    res.m_fresh_kg_s * (psychro.enthalpy(f_out(ti), W_f) - h_z),
-                "unit_Q_supply_total_W": s.m_da * (psychro.enthalpy(s.T_C, s.W) - h_z),
-            })
-        df = pd.concat([df, pd.DataFrame(rows)], axis=1)
-    df.attrs["M_da_kg"] = M_da
-    return df
+    return zone.frame(sol.t, sol.y[0], sol.y[1] if zone.humid else None)
 
 
 # --------------------------------------------------------------------------
@@ -370,6 +400,9 @@ COACH_FIELDS: dict[str, str] = {
     "length_m": "m",
     "width_m": "m",
     "height_m": "m",
+    "exterior_length_m": "m",
+    "exterior_width_m": "m",
+    "exterior_height_m": "m",
     "envelope_area_Ae_m2": "m2",
     "glazing_area_per_side_m2": "m2",
     "seats": "-",
@@ -393,6 +426,9 @@ class CoachDefinition:
     length_m: float
     width_m: float
     height_m: float
+    exterior_length_m: float
+    exterior_width_m: float
+    exterior_height_m: float
     envelope_area_Ae_m2: float
     glazing_area_per_side_m2: float
     seats: float
@@ -402,8 +438,23 @@ class CoachDefinition:
 
     @property
     def air_volume_m3(self) -> float:
-        """Interior air volume V = length * width * height [m3]."""
+        """Interior air volume V = length * width * height [m3] (interior dimensions)."""
         return self.length_m * self.width_m * self.height_m
+
+    @property
+    def exterior_volume_m3(self) -> float:
+        """Volume the coach displaces in a chamber [m3] (exterior dimensions)."""
+        return self.exterior_length_m * self.exterior_width_m * self.exterior_height_m
+
+    @property
+    def roof_area_m2(self) -> float:
+        """Sunlit roof area = exterior length * exterior width [m2] (consistent with Ae)."""
+        return self.exterior_length_m * self.exterior_width_m
+
+    @property
+    def side_area_m2(self) -> float:
+        """One side wall incl. glazing = exterior length * exterior height [m2]."""
+        return self.exterior_length_m * self.exterior_height_m
 
     def thermal_model(self) -> SingleZoneCoach:
         """The single-zone model of this coach."""

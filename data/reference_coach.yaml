@@ -5,13 +5,18 @@
 # while any of these IDs has an empty value, and lists the missing IDs.
 #
 # Envelope area Ae follows the k-value reference-area definition in E-008.
-# Length / width / height are interior dimensions, used for the air volume.
+# length / width / height are INTERIOR dimensions (air volume); exterior_* are
+# EXTERIOR dimensions (solar areas, chamber displacement), consistent with Ae
+# (UIC 553-1 7.2.2).
 
 name: reference coach
 k_value_W_m2K: E-002
 length_m: E-034
 width_m: E-035
 height_m: E-036
+exterior_length_m: E-093
+exterior_width_m: E-094
+exterior_height_m: E-095
 envelope_area_Ae_m2: E-037
 glazing_area_per_side_m2: E-038
 seats: E-039

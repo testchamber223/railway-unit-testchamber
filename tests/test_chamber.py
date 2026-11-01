@@ -116,7 +116,7 @@ def test_chamber_ramp_respects_rate_limit(vreg):
 
 
 def test_chamber_holds_setpoint_within_tolerance_once_stable(vreg, vcoach, vcard):
-    res = run_procedure("comfort_steady_zone2", coach=vcoach, unit_card=vcard, evidence=vreg,
+    res = run_procedure("comfort_en13129_zone2", coach=vcoach, unit_card=vcard, evidence=vreg,
                         sensors="evidence", seed=5)
     ch = VehicleChamber.from_evidence(vreg)
     setpoint = vreg.number("E-023", "degC")
@@ -133,6 +133,6 @@ def test_chamber_holds_setpoint_within_tolerance_once_stable(vreg, vcoach, vcard
 
 def test_chamber_capacity_limit_is_flagged(vcoach, vcard):
     reg = verification_registry(E_065=5000.0)
-    res = run_procedure("comfort_steady_zone2", coach=vcoach, unit_card=vcard, evidence=reg)
+    res = run_procedure("comfort_en13129_zone2", coach=vcoach, unit_card=vcard, evidence=reg)
     assert any(v.startswith("E-065") for v in res.validity)
     assert not res.passed

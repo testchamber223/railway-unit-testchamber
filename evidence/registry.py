@@ -195,6 +195,7 @@ class Registry:
     def with_overrides(self, values: Mapping[str, float | str], label: str) -> Registry:
         """A copy of this registry with some values replaced and marked ``label``.
 
+        ``values`` maps id -> value, or id -> {"value": v, "tolerance": t}.
         Used to run verification cases with explicitly labelled stand-in values
         (e.g. ``label="verification-only"``) instead of writing invented
         numbers into evidence.csv. Overridden records keep their id, name and
@@ -206,8 +207,13 @@ class Registry:
         new._records = dict(self._records)
         for evidence_id, value in values.items():
             rec = self.get(evidence_id).record
+            update = dict(value) if isinstance(value, Mapping) else {"value": value}
+            unknown = set(update) - {"value", "tolerance"}
+            if unknown:
+                raise ValueError(f"{evidence_id}: overrides may set value / tolerance, "
+                                 f"not {sorted(unknown)}")
             new._records[evidence_id] = EvidenceRecord.model_validate(
-                {**rec.model_dump(), "value": value, "override": label})
+                {**rec.model_dump(), **update, "override": label})
         return new
 
     def overrides(self) -> list[EvidenceRecord]:

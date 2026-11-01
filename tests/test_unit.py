@@ -44,7 +44,8 @@ def test_dhf14_card_reports_missing_fields():
     assert card.si("heating_capacity") == pytest.approx(4500.0)
     assert card.si("heating_rating_outdoor_dry_bulb") == -20.0
     assert "rated_total_cooling_capacity" not in open_fields
-    assert "9 open datasheet item(s)" in card.report()
+    assert "10 open datasheet item(s)" in card.report()
+    assert open_fields["control_type"] == "assumption (value empty)"
 
 
 def test_dhf14_model_refuses_to_run_and_lists_fields():

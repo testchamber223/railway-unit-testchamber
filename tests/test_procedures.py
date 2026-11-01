@@ -20,7 +20,8 @@ from core.procedures import (PROCEDURES_DIR, ProcedureError, k_value_test, load_
                              parse_procedure, run_procedure)
 
 ALL = ["k_value_uic553_1", "unit_capacity_rating", "pulldown_cooling",
-       "comfort_steady_zone1", "comfort_steady_zone2", "user_custom_example"]
+       "comfort_en13129_zone1", "comfort_en13129_zone2", "comfort_uic553_1_zone1",
+       "comfort_uic553_1_zone2", "user_custom_example"]
 
 
 def _data(name):
@@ -63,7 +64,7 @@ def test_ported_k_test_reports_not_steady(vreg):
 # --------------------------------------------------------------------------
 
 def test_unknown_keys_are_rejected():
-    data = _data("comfort_steady_zone2")
+    data = _data("comfort_en13129_zone2")
     data["colour"] = "red"
     data["steps"][0]["set_conditions"]["chamber_temp"] = "E-023"
     with pytest.raises(ProcedureError) as exc:
@@ -74,14 +75,14 @@ def test_unknown_keys_are_rejected():
 
 
 def test_unknown_step_type_is_rejected():
-    data = _data("comfort_steady_zone2")
+    data = _data("comfort_en13129_zone2")
     data["steps"].append({"wait_forever": {}})
     with pytest.raises(ProcedureError, match="unknown key 'steps\\[3\\].wait_forever'"):
         parse_procedure(data)
 
 
 def test_missing_evidence_id_is_rejected(vreg, vcoach, vcard):
-    data = _data("comfort_steady_zone2")
+    data = _data("comfort_en13129_zone2")
     data["steps"][0]["set_conditions"]["chamber_T"] = "E-999"
     with pytest.raises(ProcedureError, match="steps\\[0\\].set_conditions.chamber_T: "
                                              "unknown evidence ID E-999"):
@@ -105,7 +106,7 @@ def test_empty_assumption_in_acceptance_criterion_is_rejected(vcoach, vcard):
 
 def test_unsourced_registry_lists_every_empty_value(vcoach, vcard):
     with pytest.raises(ProcedureError) as exc:
-        run_procedure("comfort_steady_zone1", coach=vcoach, unit_card=vcard)
+        run_procedure("comfort_en13129_zone1", coach=vcoach, unit_card=vcard)
     ids = set(re.findall(r"E-\d{3}", " ".join(exc.value.problems)))
     assert {"E-071", "E-072", "E-073", "E-074", "E-030", "E-031", "E-029"} <= ids
 
@@ -116,20 +117,20 @@ def test_unsourced_registry_lists_every_empty_value(vcoach, vcard):
     ("E-051", "plot-only"),
 ])
 def test_bad_references_are_rejected(vreg, vcoach, vcard, value, message):
-    data = _data("comfort_steady_zone2")
+    data = _data("comfort_en13129_zone2")
     data["steps"][0]["set_conditions"]["chamber_T"] = value
     with pytest.raises(ProcedureError, match=message):
         run_procedure(parse_procedure(data), coach=vcoach, unit_card=vcard, evidence=vreg)
 
 
 def test_unit_mismatch_and_undeclared_parameter_are_rejected(vreg, vcoach, vcard):
-    data = _data("comfort_steady_zone2")
-    data["steps"][0]["set_conditions"]["chamber_T"] = "E-016"        # W/m2, not degC
+    data = _data("comfort_en13129_zone2")
+    data["steps"][0]["set_conditions"]["chamber_T"] = "E-078"        # W/m2, not degC
     data["steps"][1]["hold_until_stable"]["max_duration"] = "param:nope"
     with pytest.raises(ProcedureError) as exc:
         run_procedure(parse_procedure(data), coach=vcoach, unit_card=vcard, evidence=vreg)
     msg = str(exc.value)
-    assert "E-016 has unit 'W/m2', expected 'degC'" in msg
+    assert "E-078 has unit 'W/m2', expected 'degC'" in msg
     assert "parameter 'nope' is not declared" in msg
 
 
@@ -138,13 +139,14 @@ def test_unit_mismatch_and_undeclared_parameter_are_rejected(vreg, vcoach, vcard
 # --------------------------------------------------------------------------
 
 def test_result_lists_every_evidence_id_used(vreg, vcoach, vcard):
-    res = run_procedure("comfort_steady_zone1", coach=vcoach, unit_card=vcard, evidence=vreg,
+    res = run_procedure("comfort_en13129_zone1", coach=vcoach, unit_card=vcard, evidence=vreg,
                         sensors="evidence")
-    in_file = set(re.findall(r"E-\d{3}", (PROCEDURES_DIR / "comfort_steady_zone1.yaml")
+    in_file = set(re.findall(r"E-\d{3}", (PROCEDURES_DIR / "comfort_en13129_zone1.yaml")
                              .read_text(encoding="utf-8").split("name:", 1)[1]))
     facility = {"E-061", "E-062", "E-063", "E-064", "E-065", "E-066", "E-067"}
     sensors = {"E-058", "E-059", "E-060"}
-    coach = {"E-002", "E-034", "E-035", "E-036", "E-037", "E-038", "E-040"}
+    coach = {"E-002", "E-034", "E-035", "E-036", "E-037", "E-038", "E-040",
+             "E-093", "E-094", "E-095"}
     curve = {"E-042", "E-043", "E-044", "E-045", "E-046", "E-047"}
     assert in_file | facility | sensors | coach | curve <= set(res.evidence_ids)
     assert "E-041" not in res.evidence_ids         # equipment load is not applied
@@ -153,7 +155,7 @@ def test_result_lists_every_evidence_id_used(vreg, vcoach, vcard):
 
 
 def test_result_flags_assumptions_overrides_and_user_values(vreg, vcoach, vcard):
-    res = run_procedure("comfort_steady_zone1", coach=vcoach, unit_card=vcard, evidence=vreg)
+    res = run_procedure("comfort_en13129_zone1", coach=vcoach, unit_card=vcard, evidence=vreg)
     flagged = {u.id for u in res.assumptions}
     for use in res.evidence_used:
         if use.status in ("assumption", "plot-only assumption") or use.override:
@@ -246,3 +248,54 @@ def test_pulldown_with_unreachable_setpoint_fails_validly(vreg, vcoach, vcard):
                         parameters={"max_pulldown": 2.0})
     assert not res.passed
     assert any("did not reach" in v for v in res.validity)
+
+
+# --------------------------------------------------------------------------
+# One standard per procedure
+# --------------------------------------------------------------------------
+
+def test_every_procedure_file_uses_rows_of_its_own_standard_only():
+    from core.procedures import standard_families
+    from evidence.registry import Registry
+    reg = Registry()
+    for name in ALL:
+        text = (PROCEDURES_DIR / f"{name}.yaml").read_text(encoding="utf-8")
+        declared = standard_families(load_procedure(name).file.standard)
+        assert len(declared) <= 1, name
+        body = text.split("name:", 1)[1]                 # ignore header comments
+        for eid in set(re.findall(r"E-\d{3}", body.split("description:")[0] +
+                                  body.split("initial_state:")[-1])):
+            fam = standard_families(reg.get(eid).record.source)
+            assert not fam or fam == declared, (name, eid, fam, declared)
+
+
+@pytest.mark.parametrize("name", ["comfort_en13129_zone1", "comfort_uic553_1_zone2"])
+def test_split_comfort_procedures_run(vreg, vcoach, vcard, name):
+    res = run_procedure(name, coach=vcoach, unit_card=vcard, evidence=vreg)
+    assert res.measurements["cabin_T_mean"].value > 0
+    assert not any("MIXED" in n for n in res.notes)
+
+
+def test_mixing_standards_is_rejected(vreg, vcoach, vcard):
+    data = _data("comfort_en13129_zone1")
+    data["steps"][0]["set_conditions"]["solar"]["intensity"] = "E-013"      # UIC 553-1 row
+    with pytest.raises(ProcedureError) as exc:
+        run_procedure(parse_procedure(data), coach=vcoach, unit_card=vcard, evidence=vreg)
+    msg = str(exc.value)
+    assert "mixes standards" in msg and "E-013 (UIC 553-1)" in msg and "EN 13129" in msg
+
+
+def test_mixing_is_allowed_with_a_reason_and_reported(vreg, vcoach, vcard):
+    data = _data("comfort_en13129_zone1")
+    data["steps"][0]["set_conditions"]["solar"]["intensity"] = "E-013"
+    data["mixed_standards_reason"] = "client asked for the UIC solar value"
+    res = run_procedure(parse_procedure(data), coach=vcoach, unit_card=vcard, evidence=vreg)
+    assert res.notes[0].startswith("MIXED STANDARDS allowed (E-013 (UIC 553-1))")
+    assert "client asked" in res.notes[0]
+
+
+def test_procedure_naming_two_standards_is_rejected(vreg, vcoach, vcard):
+    data = _data("comfort_en13129_zone1")
+    data["standard"] = "EN 13129:2016 / UIC 553-1"
+    with pytest.raises(ProcedureError, match="follows ONE standard"):
+        run_procedure(parse_procedure(data), coach=vcoach, unit_card=vcard, evidence=vreg)

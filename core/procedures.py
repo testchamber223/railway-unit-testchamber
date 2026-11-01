@@ -354,6 +354,25 @@ class ProcedureFile(_Strict):
     steps: list[dict]
     measured_quantities: list[str]
     acceptance: list[Criterion] = []
+    mixed_standards_reason: str = ""      # required to use rows from another standard
+
+
+# Test standards recognised in evidence sources and in a procedure's 'standard'.
+# Handbooks and datasheets (ASHRAE Fundamentals, glazing datasheet, ...) are not
+# test standards and are not counted.
+STANDARD_FAMILIES: tuple[tuple[str, str], ...] = (
+    ("UIC 553-1", r"UIC\s*553-1"),
+    ("UIC 553", r"UIC\s*553(?!-\d)"),
+    ("EN 13129", r"EN\s*13129"),
+    ("EN 14750", r"EN\s*14750"),
+    ("EN 14511", r"EN\s*14511"),
+    ("ASHRAE 37", r"ASHRAE\s*37"),
+)
+
+
+def standard_families(text: str) -> set[str]:
+    """Test standards named in ``text`` (e.g. an evidence source)."""
+    return {name for name, pattern in STANDARD_FAMILIES if re.search(pattern, text or "")}
 
 
 STEP_MODELS: dict[str, type[BaseModel] | None] = {
@@ -504,6 +523,7 @@ class _Resolver:
         self.evidence_used: dict[str, EvidenceUse] = {}
         self.user_defined: dict[str, UserDefinedUse] = {}
         self.problems: list[str] = []
+        self.file_rows: dict = {}      # evidence rows referenced by the procedure file
 
     def _note_evidence(self, rec, where: str) -> None:
         use = self.evidence_used.setdefault(rec.id, EvidenceUse(
@@ -597,6 +617,7 @@ class _Resolver:
             self.problems.append(f"{where}: {eid} has unit {rec.unit!r}, expected {unit!r}")
             return None
         self._note_evidence(rec, where)
+        self.file_rows[eid] = rec
         if band:
             if rec.tolerance is None:
                 self.problems.append(f"{where}: {eid} has no tolerance for a band")
@@ -780,6 +801,7 @@ def run_procedure(
 
     # ---- dry resolution of every reference (collects all problems) -------
     _resolve_all(proc, r)
+    mixing_note = _check_one_standard(pf, r)
     facility = None
     try:
         facility = (VehicleChamber.from_evidence(reg) if pf.facility == "vehicle_chamber"
@@ -815,7 +837,9 @@ def run_procedure(
             r.problems.append("vehicle_chamber procedures need a coach")
         elif isinstance(coach, CoachDefinition):
             used = ["k_value_W_m2K", "envelope_area_Ae_m2", "heat_capacity_J_K",
-                    "length_m", "width_m", "height_m"]          # model, air volume, solar
+                    "length_m", "width_m", "height_m",           # model, air volume
+                    "exterior_length_m", "exterior_width_m", "exterior_height_m"]  # solar,
+                                                                 # chamber displacement
             if any(k == "set_conditions" and getattr(s, "solar", None) not in (None, "off")
                    for k, s in proc.steps):
                 used.append("glazing_area_per_side_m2")
@@ -830,9 +854,36 @@ def run_procedure(
     else:
         result = _run_room(proc, r, facility, unit, sensor_set)
     result.sensors = "ideal" if sensor_set.is_ideal else f"evidence accuracies, seed {seed}"
+    if mixing_note:
+        result.notes.insert(0, mixing_note)
     if r.problems:             # problems found while evaluating (should not happen)
         raise ProcedureError(pf.name, r.problems)
     return result
+
+
+def _check_one_standard(pf: ProcedureFile, r: _Resolver) -> str | None:
+    """One standard per procedure: no evidence row from another test standard.
+
+    Returns a note when mixing is explicitly allowed by mixed_standards_reason.
+    """
+    declared = standard_families(pf.standard)
+    reason = pf.mixed_standards_reason.strip()
+    if len(declared) > 1 and not reason:
+        r.problems.append(f"'standard: {pf.standard}' names {sorted(declared)}: a procedure "
+                          f"follows ONE standard (or give 'mixed_standards_reason')")
+    foreign = []
+    for eid, rec in sorted(r.file_rows.items()):
+        fam = standard_families(rec.source)
+        if fam and not fam & declared:
+            foreign.append(f"{eid} ({', '.join(sorted(fam))})")
+    if foreign and not reason:
+        r.problems.append(f"mixes standards: the procedure follows "
+                          f"{', '.join(sorted(declared)) or 'no test standard'} but uses "
+                          f"{'; '.join(foreign)}. Use rows of one standard, or give "
+                          f"'mixed_standards_reason'")
+    if (foreign or len(declared) > 1) and reason:
+        return f"MIXED STANDARDS allowed ({'; '.join(foreign)}): {reason}"
+    return None
 
 
 def _resolve_all(proc: Procedure, r: _Resolver) -> None:
@@ -983,7 +1034,7 @@ def _run_vehicle(proc, r, chamber: VehicleChamber, coach, unit, sensors, dt_out_
         terms, lamp_power = [], 0.0
         if st["solar"]:
             s, d = st["solar"], coach
-            roof, side = d.length_m * d.width_m, d.length_m * d.height_m
+            roof, side = d.roof_area_m2, d.side_area_m2          # exterior dimensions
             glaz = d.glazing_area_per_side_m2
             for surf in s["surfaces"]:
                 I_s, A_op, A_g = ((s["I"], roof, 0.0) if surf == "roof"
@@ -1030,7 +1081,7 @@ def _run_vehicle(proc, r, chamber: VehicleChamber, coach, unit, sensors, dt_out_
 
     def _plant_check(seg: Segment) -> None:
         W_ch = psychro.humidity_ratio(st["T_set"], st["RH"]) if humid else None
-        vol = coach.air_volume_m3 if isinstance(coach, CoachDefinition) else (
+        vol = coach.exterior_volume_m3 if isinstance(coach, CoachDefinition) else (
             model.air_volume_m3 or 0.0)
         P = chamber.plant_power(seg.full, seg.full["T_chamber_C"].to_numpy(), W_ch,
                                 seg.full.attrs["lamp_power_W"], vol)
@@ -1157,7 +1208,7 @@ def _vehicle_quantities(pf, r, chamber, model, sensors, segments, windows, event
 
             def ttr(b, sens, full=full, target=target, tol=tol):
                 t = full["t_s"].to_numpy()
-                T = sens.read("T_cabin", "temperature", full["T_C"].to_numpy())[0] \
+                T = sens.read("T_cabin", "temperature", full["T_C"].to_numpy(), t=t)[0] \
                     + b.get("T_cabin", 0.0)
                 d = np.abs(T - target) - tol
                 hit = np.flatnonzero(d <= 0)
@@ -1176,13 +1227,13 @@ def _vehicle_quantities(pf, r, chamber, model, sensors, segments, windows, event
         t = w["t_s"].to_numpy()
 
         def cabin(b, sens, w=w, t=t):
-            T = sens.read("T_cabin", "temperature", w["T_C"].to_numpy())[0] \
+            T = sens.read("T_cabin", "temperature", w["T_C"].to_numpy(), t=t)[0] \
                 + b.get("T_cabin", 0.0)
             return _time_mean_window(t, T)
 
         def chamber_mean(b, sens, w=w, t=t):
             T = chamber.measured_temperature(w["T_chamber_C"].to_numpy(), sens,
-                                             b.get("T_chamber", 0.0))
+                                             b.get("T_chamber", 0.0), t=t)
             return _time_mean_window(t, T)
 
         both = [Channel("T_cabin", "temperature"),
@@ -1203,7 +1254,7 @@ def _vehicle_quantities(pf, r, chamber, model, sensors, segments, windows, event
                 continue
 
             def rh(b, sens, w=w, t=t):
-                RH = sens.read("RH_cabin", "humidity", w["RH"].to_numpy())[0] \
+                RH = sens.read("RH_cabin", "humidity", w["RH"].to_numpy(), t=t)[0] \
                     + b.get("RH_cabin", 0.0)
                 return _time_mean_window(t, RH)
             make(q, rh, [Channel("RH_cabin", "humidity")])

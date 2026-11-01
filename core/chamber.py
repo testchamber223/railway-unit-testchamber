@@ -30,6 +30,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -100,42 +101,60 @@ class UnitTestRoom:
 
     def measure(self, unit: DXUnit, indoor: tuple[float, float], outdoor: tuple[float, float],
                 mode: Mode, part_load: float, fresh_fraction: float,
-                sensors: SensorSet) -> RoomMeasurement:
+                sensors: SensorSet,
+                humidity: Literal["dew_point", "rh"] = "dew_point") -> RoomMeasurement:
         """Run the unit between the rooms and measure it by the air-enthalpy method.
 
         indoor, outdoor: (T [degC], W [kg/kg]) room setpoints; fresh_fraction:
         dry-air mass fraction of outdoor-room air in the unit inlet.
         Measurement planes: unit air inlet (after the mixing box) and supply
         outlet. Fan power is taken from the unit card (no meter uncertainty).
+        humidity: instrument for the humidity channels -- "dew_point"
+        (chilled-mirror hygrometer, default) or "rh" (capacitive RH sensor).
+        The unit room is steady state, so sensor lag and sampling do not
+        matter here; calibration error and resolution do.
         """
         (T_i, W_i), (T_o, W_o) = indoor, outdoor
         res = unit.operate(T_i, W_i, T_o, W_o, T_o, mode, part_load, fresh_fraction=fresh_fraction)
         inlet, outlet, m = res.mixed, res.supply, res.supply.m_da
-        rh_in = psychro.rh_from_humidity_ratio(inlet.T_C, inlet.W)
-        rh_out = psychro.rh_from_humidity_ratio(outlet.T_C, outlet.W)
         P_fan = res.Q_fan_W
+        if humidity not in ("dew_point", "rh"):
+            raise ValueError(f"humidity={humidity!r} must be 'dew_point' or 'rh'")
+        H = "DP" if humidity == "dew_point" else "RH"
 
-        def state(bias, T_ch, RH_ch, T_true, RH_true):
+        def true_humidity(T, W):
+            RH = psychro.rh_from_humidity_ratio(T, W)
+            return psychro.dew_point(T, RH) if humidity == "dew_point" else RH
+
+        def humidity_ratio_from_reading(T, reading):
+            if humidity == "dew_point":            # W at saturation at the dew point
+                return psychro.sat_humidity_ratio(min(reading, T))
+            return psychro.humidity_ratio(T, min(max(reading, 0.0), 1.0))
+
+        h_in, h_out = true_humidity(inlet.T_C, inlet.W), true_humidity(outlet.T_C, outlet.W)
+
+        def state(bias, T_ch, H_ch, T_true, H_true):
             T = sensors.read(T_ch, "temperature", T_true)[0, 0] + bias.get(T_ch, 0.0)
-            RH = sensors.read(RH_ch, "humidity", RH_true)[0, 0] + bias.get(RH_ch, 0.0)
-            RH = min(max(RH, 0.0), 1.0)
-            return T, psychro.humidity_ratio(T, RH)
+            reading = sensors.read(H_ch, humidity if humidity == "dew_point" else "humidity",
+                                   H_true)[0, 0] + bias.get(H_ch, 0.0)
+            return T, humidity_ratio_from_reading(T, reading)
 
         def mass_flow(bias):
             return sensors.read("airflow", "airflow", m)[0, 0] * (1 + bias.get("airflow", 0.0))
 
         def q_net(bias):
-            T1, W1 = state(bias, "T_unit_in", "RH_unit_in", inlet.T_C, rh_in)
-            T2, W2 = state(bias, "T_unit_out", "RH_unit_out", outlet.T_C, rh_out)
+            T1, W1 = state(bias, "T_unit_in", f"{H}_unit_in", inlet.T_C, h_in)
+            T2, W2 = state(bias, "T_unit_out", f"{H}_unit_out", outlet.T_C, h_out)
             return mass_flow(bias) * (psychro.enthalpy(T1, W1) - psychro.enthalpy(T2, W2))
 
         def q_sens_gross(bias):
-            T1, _ = state(bias, "T_unit_in", "RH_unit_in", inlet.T_C, rh_in)
-            T2, W2 = state(bias, "T_unit_out", "RH_unit_out", outlet.T_C, rh_out)
+            T1, _ = state(bias, "T_unit_in", f"{H}_unit_in", inlet.T_C, h_in)
+            T2, W2 = state(bias, "T_unit_out", f"{H}_unit_out", outlet.T_C, h_out)
             return mass_flow(bias) * (psychro.enthalpy(T1, W2) - psychro.enthalpy(T2, W2)) + P_fan
 
-        channels = [Channel("T_unit_in", "temperature"), Channel("RH_unit_in", "humidity"),
-                    Channel("T_unit_out", "temperature"), Channel("RH_unit_out", "humidity"),
+        h_kind = "dew_point" if humidity == "dew_point" else "humidity"
+        channels = [Channel("T_unit_in", "temperature"), Channel(f"{H}_unit_in", h_kind),
+                    Channel("T_unit_out", "temperature"), Channel(f"{H}_unit_out", h_kind),
                     Channel("airflow", "airflow")]
         net = propagate(q_net, channels, sensors)
         measured = {
@@ -159,7 +178,9 @@ class UnitTestRoom:
         ):
             RH_set = psychro.rh_from_humidity_ratio(T_set, W_set)
             T_meas = sensors.read(f"T_{room}_room", "temperature", T_set)[0, 0]
-            RH_meas = sensors.read(f"RH_{room}_room", "humidity", RH_set)[0, 0]
+            H_meas = sensors.read(f"{H}_{room}_room", h_kind, true_humidity(T_set, W_set))[0, 0]
+            RH_meas = psychro.rh_from_humidity_ratio(
+                T_meas, humidity_ratio_from_reading(T_meas, H_meas))
             if abs(T_meas - T_set) > tol_T:
                 validity.append(f"{eT}: {room} room measured {T_meas:.2f} degC, set "
                                 f"{T_set:.2f} +/- {tol_T:g} K")
@@ -174,7 +195,8 @@ class UnitTestRoom:
             validity.append(f"E-057: outdoor room must absorb >= {condenser:.0f} W "
                             f"> capacity {self.Q_max_outdoor_W:.0f} W")
         notes = ["outdoor-room load excludes compressor power (EIR curve E-049 not available)",
-                 "fan power from the unit card, no power-meter uncertainty"]
+                 "fan power from the unit card, no power-meter uncertainty",
+                 f"humidity measured with {'a dew-point hygrometer' if H == 'DP' else 'RH sensors'}"]
         return RoomMeasurement(measured, true, res, validity, notes)
 
 
@@ -239,14 +261,17 @@ class VehicleChamber:
         return abs(T_set - T_start) / rate * SECONDS_PER_HOUR
 
     def probe_readings(self, T_true: np.ndarray, sensors: SensorSet,
-                       bias: float = 0.0) -> np.ndarray:
-        """Readings of the n_probes chamber probes, shape (n_probes, n_samples)."""
-        return sensors.read("T_chamber", "temperature", T_true, self.n_probes) + bias
+                       bias: float = 0.0, t: np.ndarray | None = None) -> np.ndarray:
+        """Readings of the n_probes chamber probes, shape (n_probes, n_samples).
+
+        With ``t`` the probe lag and sampling are applied (core.sensors).
+        """
+        return sensors.read("T_chamber", "temperature", T_true, self.n_probes, t=t) + bias
 
     def measured_temperature(self, T_true: np.ndarray, sensors: SensorSet,
-                             bias: float = 0.0) -> np.ndarray:
+                             bias: float = 0.0, t: np.ndarray | None = None) -> np.ndarray:
         """Measured chamber temperature = mean of the probes (UIC 553-1 App. H)."""
-        return self.probe_readings(T_true, sensors, bias).mean(axis=0)
+        return self.probe_readings(T_true, sensors, bias, t).mean(axis=0)
 
     def plant_power(self, df: pd.DataFrame, T_chamber: np.ndarray, W_chamber: float | None,
                     lamp_power_W: float, coach_volume_m3: float) -> np.ndarray:
