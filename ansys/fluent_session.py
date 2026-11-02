@@ -167,15 +167,18 @@ class LaunchedFluent:
 
 
 def launch_solver(cwd: Path, processor_count: int = 1, start_timeout_s: float = 300.0,
-                  port_timeout_s: float = 120.0) -> LaunchedFluent:
-    """Start Fluent (solver, no GUI) in ``cwd`` and connect once its port is open."""
+                  port_timeout_s: float = 120.0, dimension: int = 3) -> LaunchedFluent:
+    """Start Fluent (solver, no GUI) in ``cwd`` and connect once its port is open.
+
+    ``dimension`` is 3 (default) or 2 (2D solver, e.g. the Case 0 cavity).
+    """
     pyfluent = _import_pyfluent()
     cwd = Path(cwd)
     cwd.mkdir(parents=True, exist_ok=True)
     mode = getattr(getattr(pyfluent, "FluentMode", None), "SOLVER", "solver")
     cmd, sifile = pyfluent.launch_fluent(
         mode=mode, ui_mode="no_gui", processor_count=processor_count, cwd=str(cwd),
-        start_timeout=int(start_timeout_s), dry_run=True)
+        start_timeout=int(start_timeout_s), dimension=dimension, dry_run=True)
     sif = Path(sifile)
     sif.unlink(missing_ok=True)
     notes: list[str] = []

@@ -458,9 +458,35 @@ resolution acting through the proportional gain.
 
 ## CFD and reduced-order model: cases, mesh convergence, calibration, validity range
 
-> **No CFD results are included yet.** All three cases are `planned`. Every
-> number shown as "CFD" in tests and in `docs/piece8_cfd_rom.ipynb` is
-> manufactured, verification-only data.
+> **Case 0 has real Fluent results (2 Nov 2026); cases 1 and 2 are still
+> `planned`.** Every other number shown as "CFD" in tests and in
+> `docs/piece8_cfd_rom.ipynb` is manufactured, verification-only data.
+
+**Case 0 run in Fluent (2 Nov 2026).** Ansys Fluent 2026 R1 Student, 2D double
+precision, pressure-based coupled solver, laminar, Boussinesq air (CoolProp
+properties at 20 °C, Pr = 0.708), PRESTO! pressure, second-order momentum and
+energy. Meshes are uniform 40², 80², 160² quads written by
+`ansys/case0_mesh.py` (no GUI meshing; Fluent's mesh check passes). The runs
+were driven by `ansys/_fluent_runs/case0/case0_all.py` inside the Fluent GUI
+(same set-up as `ansys/run_case0.py`, which drives Fluent from VS Code through
+PyFluent). A run only counts as converged when Nu changes by < 1e-7 per 100
+iterations **and** the hot and cold wall heat rates balance within 1e-3.
+
+| Ra | Nu 40² | Nu 80² | Nu 160² | apparent order p | Nu extrapolated | GCI fine | max imbalance |
+|---|---|---|---|---|---|---|---|
+| 10³ | 1.1197 | 1.1183 | 1.1179 | 1.96 | 1.1178 | 0.014 % | 3.2e-6 |
+| 10⁴ | 2.2606 | 2.2488 | 2.2457 | 1.95 | 2.2447 | 0.059 % | 2.6e-6 |
+| 10⁵ | 4.6190 | 4.5460 | 4.5272 | 1.96 | 4.5208 | 0.179 % | 9.4e-7 |
+| 10⁶ | 9.4299 | 8.9809 | 8.8636 | 1.94 | 8.8221 | 0.585 % | 2.5e-7 |
+
+Monotone convergence and p ≈ 2 (the formal order of the schemes) show the
+mesh study behaves as theory predicts. **This is verification of the
+numerics only:** the comparison with de Vahl Davis (1983) needs E-117…E-120
+transcribed from the paper and the tolerance E-121 decided; until then
+`python -m validation.case0_compare` prints the table above and "skipped".
+Lesson recorded: Fluent's face convention puts cell c0 on the LEFT of
+n0 → n1; the opposite order gives left-handed faces and negative volumes (the
+first pilot diverged that way; `tests/test_case0_mesh.py` now checks it).
 
 **Case files** (`ansys/cases/<case_id>/case.yaml`, schema and loader in
 `core/cfd_import.py`). A case records what Fluent runs: description, purpose,
@@ -552,6 +578,8 @@ and its own temperature and humidity.
 | Case files: planned load with open items; done without results / meshes, unknown key or ID, unit mismatch, bare number, plot-only, empty evidence once running | refused, clear message | pass |
 | Case 0 inputs: Ra recomputed; β·ΔT < E-123; yaml = script | 1e-12 | pass |
 | Case 0 comparison on manufactured results: GCI p = 2, extrapolated Nu exact; pass / fail against stand-in benchmark and tolerance; skips while missing | — | pass |
+| Case 0 Fluent results: converged, hot/cold balance < 1e-4, monotone, 1.8 < p < 2.1, GCI < 1 % | — | p 1.94–1.96, GCI ≤ 0.59 % |
+| Case 0 mesh files: right-handed faces, closed cells, positive signed areas | exact | pass |
 | Multi-zone with large G_mix vs single zone (pull-down, DX unit, humidity; and dry) | 0.01 K | 0.0002 K |
 | Multi-zone total enthalpy with mixing and advection | 0.1 % | pass |
 | Multi-zone steady state vs long dynamic run | 1e-3 K | pass |
@@ -610,9 +638,10 @@ and its own temperature and humidity.
     to the full coach (zone shares, G_mix, supply and return distribution).
     The calibrated multi-zone parameters are only as good as that extension
     and are valid only inside the DOE bounding box.
-20. No CFD results exist yet: every case is planned, the Case 0 benchmark
-    values (E-117…E-120) are still to be transcribed, and the multi-zone
-    parameters have only been calibrated on manufactured data.
+20. Only Case 0 (the benchmark) has CFD results; cases 1 and 2 are planned,
+    the Case 0 benchmark values (E-117…E-120) and tolerance (E-121) are still
+    open, and the multi-zone parameters have only been calibrated on
+    manufactured data.
 21. The multi-zone ROM is calibrated on steady, sensible-only zone
     temperatures (uniform humidity); dynamic and latent behaviour between
     zones is not calibrated.

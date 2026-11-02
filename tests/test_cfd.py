@@ -1,7 +1,8 @@
 """CFD case files (core/cfd_import.py), Case 0 inputs and comparison.
 
-No real CFD results exist yet. Where results are needed, the tests write
-MANUFACTURED CSV files (verification-only) into a temporary copy of a case.
+Case 0 has real Fluent results (ansys/cases/case0_devahldavis/results, run
+2 Nov 2026); cases 1 and 2 are still planned. Tests that need other results
+write MANUFACTURED CSV files (verification-only) into a temporary copy of a case.
 """
 
 import shutil
@@ -21,11 +22,14 @@ CASES = ["case0_devahldavis", "case1_chamber_section", "case2_coach_bay"]
 
 def test_planned_cases_load_with_their_open_items():
     assert list_cases() == CASES
-    for c in CASES:
+    for c in CASES[1:]:
         case = load_case(c)
         assert case.file.status == "planned"
         assert case.missing_results()             # no CFD results yet
-    assert load_case("case0_devahldavis").open_items == []
+    case0 = load_case("case0_devahldavis")
+    assert case0.file.status == "done"            # loads: every run x mesh has results
+    assert case0.missing_results() == []
+    assert case0.open_items == []
     open2 = " ".join(load_case("case2_coach_bay").open_items)
     for eid in ("E-026", "E-035", "E-036", "E-077"):
         assert eid in open2
@@ -60,6 +64,7 @@ def _edit(folder, fn):
 
 
 def test_done_case_without_results_is_refused(case0_copy):
+    shutil.rmtree(case0_copy / "results")
     _edit(case0_copy, lambda d: d.update(status="done"))
     with pytest.raises(CaseError, match="result files are missing: results/Ra1e3_coarse.csv"):
         load_case(case0_copy)
@@ -145,10 +150,33 @@ def _manufacture_results(folder, C=40.0):
             pd.DataFrame({"position_m": y, "wall_heat_flux_W_m2": q}).to_csv(path, index=False)
 
 
-def test_case0_compare_skips_while_results_are_missing():
-    for rc in compare_case0():
+def test_case0_compare_skips_while_results_are_missing(case0_copy):
+    shutil.rmtree(case0_copy / "results")
+    _edit(case0_copy, lambda d: d.update(status="planned"))
+    for rc in compare_case0(load_case(case0_copy)):
         assert rc.status == "skipped"
         assert "results missing" in rc.messages[0]
+
+
+def test_case0_fluent_results_converge_at_second_order():
+    """Real Fluent results (2 Nov 2026): every run converged with the hot and cold
+    walls in balance, Nu decreases monotonically with refinement and the apparent
+    order is close to the formal order 2 of the schemes used. No benchmark value
+    is used here (E-117..E-120 still empty), so the comparison stays 'skipped'."""
+    case = load_case("case0_devahldavis")
+    for run in case.file.runs:
+        for m in case.file.meshes:
+            row = case.read_results(run.name, m.name).iloc[0]
+            assert bool(row["converged"])
+            assert abs(row["energy_imbalance_rel"]) < 1e-4
+            assert row["Nu_avg"] == pytest.approx(row["Nu_from_total_heat"], rel=1e-5)
+    for rc in compare_case0():
+        nu = [rc.nu_by_mesh[m] for m in ("coarse", "medium", "fine")]
+        assert nu[0] > nu[1] > nu[2]                    # monotone convergence
+        assert not rc.gci.oscillatory
+        assert 1.8 < rc.gci.p < 2.1
+        assert rc.gci.gci_fine < 0.01                   # discretisation band < 1 %
+        assert rc.status == "skipped" and "benchmark E-1" in rc.messages[-1]
 
 
 def test_case0_compare_with_manufactured_results(case0_copy):

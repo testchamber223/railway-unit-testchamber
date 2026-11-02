@@ -1,13 +1,16 @@
 # Case 0 -- de Vahl Davis (1983) differentially heated square cavity, air.
 # Purpose: verify the Fluent set-up (natural convection, Boussinesq) against a
 # classic benchmark before any coach model is trusted.
-# STATUS: planned. No CFD results exist yet; benchmark values E-117..E-120 are
-# still to be transcribed from the paper.
+# STATUS: done (2 Nov 2026). 4 Ra x 3 meshes run in Ansys Fluent 2026 R1 Student,
+# 2D double precision, by ansys/_fluent_runs/case0/case0_all.py (same set-up as
+# ansys/run_case0.py); results/ holds one CSV per run and mesh. Benchmark values
+# E-117..E-120 and the tolerance E-121 are still to be transcribed / decided, so
+# validation/case0_compare.py reports the mesh study but no pass/fail yet.
 case_id: case0_devahldavis
 description: 2D square cavity, hot left wall, cold right wall, adiabatic top and bottom.
 purpose: Verification of natural-convection modelling (average Nu vs de Vahl Davis 1983).
-fluent_version: to be recorded when run
-status: planned
+fluent_version: Ansys Fluent 2026 R1 Student (2D, double precision, pressure-based)
+status: done
 
 geometry:
   side_length: {value: "param:L", unit: m, note: from ansys/case0_inputs.py (Ra exact)}
@@ -29,7 +32,7 @@ runs:
 solver:
   models: [laminar, energy, "Boussinesq density", "steady pressure-based"]
   schemes: {pressure: PRESTO!, momentum: second order upwind, energy: second order upwind,
-            pressure-velocity coupling: SIMPLE}
+            pressure-velocity coupling: Coupled}
   convergence: {continuity: 1.0e-6, x-velocity: 1.0e-6, y-velocity: 1.0e-6, energy: 1.0e-9}
 
 boundary_conditions:
@@ -55,3 +58,6 @@ results: results/{run}_{mesh}.csv
 results_format: >-
   Fluent XY export of the hot wall: columns position_m (along the wall) and
   wall_heat_flux_W_m2 (positive into the fluid); or a single column Nu_avg.
+  The Fluent runs write Nu_avg = q_avg * L / (k * dT) (area-weighted hot-wall
+  heat flux) plus checks: Nu_from_total_heat, Q_hot/Q_cold per metre depth,
+  energy_imbalance_rel, converged, iterations.
