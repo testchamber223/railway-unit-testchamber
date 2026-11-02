@@ -28,3 +28,8 @@ Thumbs.db
 *.msh*
 *.wbpj
 *_files/
+
+# Fluent session leftovers (transcripts and cleanup scripts)
+*.trn
+cleanup-fluent-*.bat
+_fluent_runs/

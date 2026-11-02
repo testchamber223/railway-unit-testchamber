@@ -8,3 +8,6 @@ requires-python = ">=3.12"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-rs"
+markers = [
+    "fluent: needs a local Ansys Fluent install and RUN_FLUENT=1 (launches Fluent, about 1-2 min)",
+]

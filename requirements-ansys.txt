@@ -1,0 +1,3 @@
+# Only on PCs with Ansys Fluent installed (Student 2026 R1 or a university licence).
+# Install with:  python -m pip install -r requirements-ansys.txt
+ansys-fluent-core
